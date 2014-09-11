@@ -1,5 +1,7 @@
 package scala.scalajs.ir
 
+import scala.annotation.tailrec
+
 import scala.math.Equiv
 
 import Trees._
@@ -12,16 +14,56 @@ object TreeEquiv {
 
   class StructTreeEquiv extends TreeEquiv {
 
-    private def equivIt(x: Iterable[Tree], y: Iterable[Tree]) =
-      x.size == y.size && (x zip y).forall { case (x,y) => equiv(x,y) }
+    @inline
+    @tailrec
+    private final def equivList(x: List[Tree], y: List[Tree]): Boolean =
+      if (x.isEmpty) y.isEmpty
+      else y.nonEmpty && equiv(x.head, y.head) && equivList(x.tail, y.tail)
 
-    private def equivOpt(x: Option[Ident], y: Option[Ident]) =
+    @inline
+    private final def equivOpt(x: Option[Ident], y: Option[Ident]) =
       x.isDefined == y.isDefined && (x.isEmpty || equiv(x.get, y.get))
 
+    @inline
+    @tailrec
+    private final def equivSwitch(x: List[(Tree, Tree)],
+        y: List[(Tree, Tree)]): Boolean = {
+      if (x.isEmpty) y.isEmpty
+      else y.nonEmpty && equiv(x.head._1, y.head._1) &&
+      equiv(x.head._2, y.head._2) && equivSwitch(x.tail, y.tail)
+    }
+
+    @inline
+    @tailrec
+    private final def equivMatch(x: List[(List[Tree], Tree)],
+        y: List[(List[Tree], Tree)]): Boolean = {
+      if (x.isEmpty) y.isEmpty
+      else y.nonEmpty && equivList(x.head._1, y.head._1) &&
+      equiv(x.head._2, y.head._2) && equivMatch(x.tail, y.tail)
+    }
+
+    @inline
+    @tailrec
+    private final def equivObj(x: List[(PropertyName, Tree)],
+        y: List[(PropertyName, Tree)]): Boolean = {
+      if (x.isEmpty) y.isEmpty
+      else y.nonEmpty && equiv(x.head._1, y.head._1) &&
+      equiv(x.head._2, y.head._2) && equivObj(x.tail, y.tail)
+    }
+
+    @inline
+    @tailrec
+    private final def equivIdList(x: List[Ident], y: List[Ident]): Boolean = {
+      if (x.isEmpty) y.isEmpty
+      else y.nonEmpty && equiv(x.head, y.head) && equivIdList(x.tail, y.tail)
+    }
+
+    def equiv(x: Ident, y: Ident): Boolean =
+      x.name == y.name && x.originalName == y.originalName
+
     def equiv(x: PropertyName, y: PropertyName): Boolean = x match {
-      case Ident(x_name, x_originalName) => y match {
-        case Ident(y_name, y_originalName) =>
-          x_name == y_name && x_originalName == y_originalName
+      case x: Ident => y match {
+        case y: Ident => equiv(x, y)
         case _ => false
       }
 
@@ -60,7 +102,7 @@ object TreeEquiv {
       }
 
       case x: Block => y match {
-        case y: Block => equivIt(x.stats, y.stats)
+        case y: Block => equivList(x.stats, y.stats)
         case _ => false
       }
 
@@ -128,9 +170,7 @@ object TreeEquiv {
       case Switch(x_selector, x_cases, x_default) => y match {
         case Switch(y_selector, y_cases, y_default) =>
           equiv(x_selector, y_selector) && equiv(x_default, y_default) &&
-          x_cases.size == y_cases.size && (x_cases zip y_cases).forall {
-            case ((x1, x2), (y1, y2)) => equiv(x1, y1) && equiv(x2, y2)
-          }
+          x_cases.size == y_cases.size && equivSwitch(x_cases, y_cases)
         case _ => false
       }
 
@@ -138,9 +178,7 @@ object TreeEquiv {
         case Match(y_selector, y_cases, y_default) =>
           x.tpe == y.tpe && equiv(x_selector, y_selector) &&
           equiv(x_default, y_default) && x_cases.size == y_cases.size &&
-          (x_cases zip y_cases).forall {
-            case ((x1, x2), (y1, y2)) => equivIt(x1, y1) && equiv(x2, y2)
-          }
+          equivMatch(x_cases, y_cases)
         case _ => false
       }
 
@@ -151,7 +189,7 @@ object TreeEquiv {
 
       case New(x_cls, x_ctor, x_args) => y match {
         case New(y_cls, y_ctor, y_args) =>
-          x_cls == y_cls && equiv(x_ctor, y_ctor) && equivIt(x_args, y_args)
+          x_cls == y_cls && equiv(x_ctor, y_ctor) && equivList(x_args, y_args)
         case _ => false
       }
 
@@ -176,21 +214,21 @@ object TreeEquiv {
       case Apply(x_receiver, x_method, x_args) => y match {
         case Apply(y_receiver, y_method, y_args) =>
           x.tpe == y.tpe && equiv(x_receiver, y_receiver) &&
-          equiv(x_method, y_method) && equivIt(x_args, y_args)
+          equiv(x_method, y_method) && equivList(x_args, y_args)
         case _ => false
       }
 
       case StaticApply(x_receiver, x_cls, x_method, x_args) => y match {
         case StaticApply(y_receiver, y_cls, y_method, y_args) =>
           x.tpe == y.tpe && x_cls == y_cls && equiv(x_receiver, y_receiver) &&
-          equiv(x_method, y_method) && equivIt(x_args, y_args)
+          equiv(x_method, y_method) && equivList(x_args, y_args)
         case _ => false
       }
 
       case TraitImplApply(x_impl, x_method, x_args) => y match {
         case TraitImplApply(y_impl, y_method, y_args) =>
           x.tpe == y.tpe && x_impl == y_impl && equiv(x_method, y_method) &&
-          equivIt(x_args, y_args)
+          equivList(x_args, y_args)
         case _ => false
       }
 
@@ -207,13 +245,13 @@ object TreeEquiv {
 
       case NewArray(x_tpe, x_lengths) => y match {
         case NewArray(y_tpe, y_lengths) =>
-          x_tpe == y_tpe && equivIt(x_lengths, y_lengths)
+          x_tpe == y_tpe && equivList(x_lengths, y_lengths)
         case _ => false
       }
 
       case ArrayValue(x_tpe, x_elems) => y match {
         case ArrayValue(y_tpe, y_elems) =>
-          x_tpe == y_tpe && equivIt(x_elems, y_elems)
+          x_tpe == y_tpe && equivList(x_elems, y_elems)
         case _ => false
       }
 
@@ -230,7 +268,7 @@ object TreeEquiv {
 
       case RecordValue(x_tpe, x_elems) => y match {
         case RecordValue(y_tpe, y_elems) =>
-          x_tpe == y_tpe && equivIt(x_elems, y_elems)
+          x_tpe == y_tpe && equivList(x_elems, y_elems)
         case _ => false
       }
 
@@ -253,7 +291,7 @@ object TreeEquiv {
 
       case CallHelper(x_helper, x_args) => y match {
         case CallHelper(y_helper, y_args) =>
-          x_helper == y_helper && x.tpe == y.tpe && equivIt(x_args, y_args)
+          x_helper == y_helper && x.tpe == y.tpe && equivList(x_args, y_args)
         case _ => false
       }
 
@@ -264,7 +302,7 @@ object TreeEquiv {
 
       case JSNew(x_ctor, x_args) => y match {
         case JSNew(y_ctor, y_args) =>
-          equiv(x_ctor, y_ctor) && equivIt(x_args, y_args)
+          equiv(x_ctor, y_ctor) && equivList(x_args, y_args)
         case _ => false
       }
 
@@ -282,27 +320,27 @@ object TreeEquiv {
 
       case JSFunctionApply(x_fun, x_args) => y match {
         case JSFunctionApply(y_fun, y_args) =>
-          equiv(x_fun, y_fun) && equivIt(x_args, y_args)
+          equiv(x_fun, y_fun) && equivList(x_args, y_args)
         case _ => false
       }
 
       case JSDotMethodApply(x_receiver, x_method, x_args) => y match {
         case JSDotMethodApply(y_receiver, y_method, y_args) =>
           equiv(x_receiver, y_receiver) && equiv(x_method, y_method) &&
-          equivIt(x_args, y_args)
+          equivList(x_args, y_args)
         case _ => false
       }
 
       case JSBracketMethodApply(x_receiver, x_method, x_args) => y match {
         case JSBracketMethodApply(y_receiver, y_method, y_args) =>
           equiv(x_receiver, y_receiver) && equiv(x_method, y_method) &&
-          equivIt(x_args, y_args)
+          equivList(x_args, y_args)
         case _ => false
       }
 
       case JSApply(x_fun, x_args) => y match {
         case JSApply(y_fun, y_args) =>
-          equiv(x_fun, y_fun) && equivIt(x_args, y_args)
+          equiv(x_fun, y_fun) && equivList(x_args, y_args)
         case _ => false
       }
 
@@ -324,15 +362,13 @@ object TreeEquiv {
       }
 
       case JSArrayConstr(x_items) => y match {
-        case JSArrayConstr(y_items) => equivIt(x_items, y_items)
+        case JSArrayConstr(y_items) => equivList(x_items, y_items)
         case _ => false
       }
 
       case JSObjectConstr(x_fields) => y match {
         case JSObjectConstr(y_fields) =>
-          x_fields.size == y_fields.size && (x_fields zip y_fields).forall {
-            case ((xn, xt), (yn, yt)) => equiv(xn, yn) && equiv(xt, yt)
-          }
+          x_fields.size == y_fields.size && equivObj(x_fields, y_fields)
         case _ => false
       }
 
@@ -386,15 +422,15 @@ object TreeEquiv {
       case Closure(x_thisType, x_args, x_resultType, x_body, x_captures) => y match {
         case Closure(y_thisType, y_args, y_resultType, y_body, y_captures) =>
           x_thisType == y_thisType && x_resultType == y_resultType &&
-          equivIt(x_args, y_args) && equiv(x_body, y_body) &&
-          equivIt(x_captures, y_captures)
+          equivList(x_args, y_args) && equiv(x_body, y_body) &&
+          equivList(x_captures, y_captures)
         case _ => false
       }
 
       case Function(x_thisType, x_args, x_resultType, x_body) => y match {
         case Function(y_thisType, y_args, y_resultType, y_body) =>
           x_thisType == y_thisType && x_resultType == y_resultType &&
-          equivIt(x_args, y_args) && equiv(x_body, y_body)
+          equivList(x_args, y_args) && equiv(x_body, y_body)
         case _ => false
       }
 
@@ -407,17 +443,14 @@ object TreeEquiv {
         case ClassDef(y_name, y_kind, y_parent, y_ancestors, y_defs) =>
           x_kind == y_kind && equiv(x_name, y_name) &&
           equivOpt(x_parent, y_parent) &&
-          x_ancestors.size == y_ancestors.size &&
-          (x_ancestors zip y_ancestors).forall {
-            case (x, y) => equiv(x, y)
-          } && equivIt(x_defs, y_defs)
+          equivIdList(x_ancestors, y_ancestors) && equivList(x_defs, y_defs)
         case _ => false
       }
 
       case MethodDef(x_name, x_args, x_resultType, x_body) => y match {
         case MethodDef(y_name, y_args, y_resultType, y_body) =>
           x_resultType == y_resultType && equiv(x_name, y_name) &&
-          equivIt(x_args, y_args) && equiv(x_body, y_body)
+          equivList(x_args, y_args) && equiv(x_body, y_body)
         case _ => false
       }
 
@@ -430,7 +463,7 @@ object TreeEquiv {
 
       case ConstructorExportDef(x_name, x_args, x_body) => y match {
         case ConstructorExportDef(y_name, y_args, y_body) =>
-          x_name == y_name && equivIt(x_args, y_args) && equiv(x_body, y_body)
+          x_name == y_name && equivList(x_args, y_args) && equiv(x_body, y_body)
         case _ => false
       }
 
@@ -446,6 +479,9 @@ object TreeEquiv {
   object StructTreeEquiv extends StructTreeEquiv
 
   class PosStructTreeEquiv extends StructTreeEquiv {
+    override def equiv(x: Ident, y: Ident): Boolean =
+      x.pos == y.pos && super.equiv(x, y)
+
     override def equiv(x: PropertyName, y: PropertyName): Boolean =
       x.pos == y.pos && super.equiv(x, y)
 

@@ -96,8 +96,8 @@ class ScalaJSOptimizer(optimizerFactory: () => GenIncOptimizer) {
       clean()
 
     val treeEquiv =
-      if (outCfg.wantSourceMap) ir.TreeEquiv.PosStructTreeEquiv
-      else ir.TreeEquiv.StructTreeEquiv
+      /*if (outCfg.wantSourceMap) ir.TreeEquiv.PosStructTreeEquiv
+      else*/ ir.TreeEquiv.StructTreeEquiv
 
     persistentState.wasWithSourceMap = outCfg.wantSourceMap
 

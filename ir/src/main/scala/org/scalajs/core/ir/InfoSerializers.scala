@@ -62,19 +62,22 @@ object InfoSerializers {
 
       def writeMethodInfo(methodInfo: MethodInfo): Unit = {
         import methodInfo._
+
+        def writePerClassStrings(m: Map[String, List[String]]): Unit = {
+          writeSeq(m.toSeq) {
+            case (cls, items) => s.writeUTF(cls); writeStrings(items)
+          }
+        }
+
         s.writeUTF(encodedName)
         s.writeBoolean(isStatic)
         s.writeBoolean(isAbstract)
         s.writeBoolean(isExported)
-        writeSeq(methodsCalled.toSeq) {
-          case (cls, callees) => s.writeUTF(cls); writeStrings(callees)
-        }
-        writeSeq(methodsCalledStatically.toSeq) {
-          case (cls, callees) => s.writeUTF(cls); writeStrings(callees)
-        }
-        writeSeq(staticMethodsCalled.toSeq) {
-          case (cls, callees) => s.writeUTF(cls); writeStrings(callees)
-        }
+        writePerClassStrings(staticFieldsRead)
+        writePerClassStrings(staticFieldsWritten)
+        writePerClassStrings(methodsCalled)
+        writePerClassStrings(methodsCalledStatically)
+        writePerClassStrings(staticMethodsCalled)
         writeStrings(instantiatedClasses)
         writeStrings(accessedModules)
         writeStrings(usedInstanceTests)
@@ -101,6 +104,11 @@ object InfoSerializers {
 
       import input._
 
+      val useHacks065 =
+        Set("0.6.0", "0.6.3", "0.6.4", "0.6.5").contains(version)
+      val useHacks0614 =
+        useHacks065 || Set("0.6.6", "0.6.8", "0.6.13", "0.6.14").contains(version)
+
       val encodedName = readUTF()
       val isExported = readBoolean()
       val kind = ClassKind.fromByte(readByte())
@@ -109,24 +117,39 @@ object InfoSerializers {
       val interfaces = readList(readUTF())
 
       def readMethod(): MethodInfo = {
+        def readPerClassStrings(): Map[String, List[String]] =
+          readList(readUTF() -> readStrings()).toMap
+
         val encodedName = readUTF()
         val isStatic = readBoolean()
         val isAbstract = readBoolean()
         val isExported = readBoolean()
-        val methodsCalled = readList(readUTF() -> readStrings()).toMap
-        val methodsCalledStatically = readList(readUTF() -> readStrings()).toMap
-        val staticMethodsCalled = readList(readUTF() -> readStrings()).toMap
+        val staticFieldsRead =
+          if (useHacks0614) Map.empty[String, List[String]]
+          else readPerClassStrings()
+        val staticFieldsWritten =
+          if (useHacks0614) Map.empty[String, List[String]]
+          else readPerClassStrings()
+        val methodsCalled = readPerClassStrings()
+        val methodsCalledStatically = readPerClassStrings()
+        val staticMethodsCalled = readPerClassStrings()
         val instantiatedClasses = readStrings()
         val accessedModules = readStrings()
         val usedInstanceTests = readStrings()
         val accessedClassData = readStrings()
         MethodInfo(encodedName, isStatic, isAbstract, isExported,
+            staticFieldsRead, staticFieldsWritten,
             methodsCalled, methodsCalledStatically, staticMethodsCalled,
             instantiatedClasses, accessedModules, usedInstanceTests,
             accessedClassData)
       }
 
-      val methods = readList(readMethod())
+      val methods0 = readList(readMethod())
+      val methods = if (useHacks065) {
+        methods0.filter(m => !Definitions.isReflProxyName(m.encodedName))
+      } else {
+        methods0
+      }
 
       val info = ClassInfo(encodedName, isExported, kind,
           superClass, interfaces, methods)
@@ -146,7 +169,7 @@ object InfoSerializers {
       val version = input.readUTF()
       val supported = ScalaJSVersions.binarySupported
       if (!supported.contains(version)) {
-        throw new IOException(
+        throw new IRVersionNotSupportedException(version, supported,
             s"This version ($version) of Scala.js IR is not supported. " +
             s"Supported versions are: ${supported.mkString(", ")}")
       }

@@ -14,141 +14,275 @@
 <ci>
 
   <task id="main"><![CDATA[
-    export JAVA_HOME=$HOME/apps/java-$java
-    sbt ++$scala package packageDoc &&
-    sbt ++$scala helloworld/run \
-        'set scalaJSStage in Global := FastOptStage' \
+    setJavaVersion $java
+    sbtretry ++$scala 'set scalaJSUseRhino in Global := true' helloworld/run &&
+    sbtretry ++$scala helloworld/run &&
+    sbtretry 'set scalaJSStage in Global := FullOptStage' \
         ++$scala helloworld/run \
+        helloworld/clean &&
+    sbtretry 'set requiresDOM in helloworld := true' \
+        ++$scala helloworld/run &&
+    sbtretry 'set requiresDOM in helloworld := true' \
         'set scalaJSStage in Global := FullOptStage' \
         ++$scala helloworld/run \
         helloworld/clean &&
-    sbt 'set scalaJSOptimizerOptions in helloworld ~= (_.withDisableOptimizer(true))' \
-        'set scalaJSStage in Global := FastOptStage' \
+    sbtretry 'set scalaJSOptimizerOptions in helloworld ~= (_.withDisableOptimizer(true))' \
+        'set scalaJSUseRhino in Global := true' \
+        ++$scala helloworld/run &&
+    sbtretry 'set scalaJSOptimizerOptions in helloworld ~= (_.withDisableOptimizer(true))' \
         ++$scala helloworld/run \
         helloworld/clean &&
-    sbt 'set inScope(ThisScope in helloworld)(postLinkJSEnv := new org.scalajs.jsenv.RetryingComJSEnv(PhantomJSEnv().value))' \
-        'set scalaJSStage in Global := FastOptStage' \
+    sbtretry 'set scalaJSSemantics in helloworld ~= (_.withAsInstanceOfs(org.scalajs.core.tools.sem.CheckedBehavior.Unchecked))' \
         ++$scala helloworld/run \
+        helloworld/clean &&
+    sbtretry 'set inScope(ThisScope in helloworld)(jsEnv := new org.scalajs.jsenv.RetryingComJSEnv(PhantomJSEnv().value))' \
+        ++$scala helloworld/run &&
+    sbtretry 'set inScope(ThisScope in helloworld)(jsEnv := new org.scalajs.jsenv.RetryingComJSEnv(PhantomJSEnv().value))' \
         'set scalaJSStage in Global := FullOptStage' \
         ++$scala helloworld/run &&
-    sbt 'set inScope(ThisScope in testingExample)(postLinkJSEnv := new org.scalajs.jsenv.RetryingComJSEnv(PhantomJSEnv().value))' \
-        ++$scala testingExample/test \
-        'set scalaJSStage in Global := FastOptStage' \
-        ++$scala testingExample/test \
-        'set scalaJSStage in Global := FullOptStage' \
-        ++$scala testingExample/test \
+    sbtretry 'set scalaJSUseRhino in Global := true' \
+        ++$scala testingExample/test:run testingExample/test &&
+    sbtretry ++$scala testingExample/test:run testingExample/test &&
+    sbtretry 'set scalaJSStage in Global := FullOptStage' \
+        ++$scala testingExample/test:run testingExample/test \
         testingExample/clean &&
-    sbt 'set inScope(ThisScope in testingExample)(postLinkJSEnv := new org.scalajs.jsenv.RetryingComJSEnv(PhantomJSEnv().value))' \
+    sbtretry 'set inScope(ThisScope in testingExample)(jsEnv := new org.scalajs.jsenv.RetryingComJSEnv(PhantomJSEnv().value))' \
+        ++$scala testingExample/test:run testingExample/test &&
+    sbtretry 'set inScope(ThisScope in testingExample)(jsEnv := new org.scalajs.jsenv.RetryingComJSEnv(PhantomJSEnv().value))' \
+        'set scalaJSStage in Global := FullOptStage' \
+        ++$scala testingExample/test:run testingExample/test \
+        testingExample/clean &&
+    sbtretry 'set scalaJSOptimizerOptions in testingExample ~= (_.withDisableOptimizer(true))' \
+        ++$scala testingExample/test:run testingExample/test &&
+    sbtretry 'set inScope(ThisScope in testingExample)(jsEnv := new org.scalajs.jsenv.RetryingComJSEnv(PhantomJSEnv().value))' \
         'set scalaJSOptimizerOptions in testingExample ~= (_.withDisableOptimizer(true))' \
-        'set scalaJSStage in Global := FastOptStage' \
-        ++$scala testingExample/test &&
-    sbt ++$scala testSuite/test noIrCheckTest/test \
-        'set scalaJSStage in Global := FastOptStage' \
-        ++$scala testSuite/test noIrCheckTest/test \
-        'set scalaJSStage in Global := FullOptStage' \
-        ++$scala testSuite/test noIrCheckTest/test \
-        testSuite/clean &&
-    sbt 'set scalaJSOptimizerOptions in testSuite ~= (_.withDisableOptimizer(true))' \
-        'set scalaJSStage in Global := FastOptStage' \
-        ++$scala testSuite/test \
-        testSuite/clean &&
-    sbt 'set scalaJSSemantics in testSuite ~= { _.withAsInstanceOfs(org.scalajs.core.tools.sem.CheckedBehavior.Compliant).withStrictFloats(true) }' \
-        ++$scala testSuite/test \
-        'set scalaJSStage in Global := FastOptStage' \
-        ++$scala testSuite/test \
-        'set scalaJSStage in Global := FullOptStage' \
-        ++$scala testSuite/test \
-        testSuite/clean &&
-    sbt 'set scalaJSSemantics in testSuite ~= { _.withAsInstanceOfs(org.scalajs.core.tools.sem.CheckedBehavior.Compliant).withStrictFloats(true) }' \
-        'set scalaJSOptimizerOptions in testSuite ~= (_.withDisableOptimizer(true))' \
-        'set scalaJSStage in Global := FastOptStage' \
-        ++$scala testSuite/test \
-        testSuite/clean &&
-    sbt 'set inScope(ThisScope in helloworld)(postLinkJSEnv := new org.scalajs.jsenv.RetryingComJSEnv(PhantomJSEnv().value))' \
-        'set scalaJSStage in Global := FastOptStage' \
-        ++$scala testSuite/test \
-        'set scalaJSStage in Global := FullOptStage' \
-        ++$scala testSuite/test \
-        testSuite/clean &&
-    sbt 'set scalacOptions in testSuite += "-Xexperimental"' \
-        ++$scala testSuite/test \
-        'set scalaJSStage in Global := FastOptStage' \
-        ++$scala testSuite/test \
-        'set scalaJSStage in Global := FullOptStage' \
-        ++$scala testSuite/test &&
-    sbt 'set scalaJSStage in Global := FastOptStage' \
-        ++$scala javalibExTestSuite/test \
-        'set scalaJSStage in Global := FullOptStage' \
+        ++$scala testingExample/test:run testingExample/test &&
+    sbtretry ++$scala library/test &&
+    sbtretry ++$scala testSuiteJVM/test testSuiteJVM/clean &&
+    sbtretry ++$scala 'testSuite/test:runMain org.scalajs.testsuite.junit.JUnitBootstrapTest' &&
+    sbtretry ++$scala testSuite/test &&
+    sbtretry ++$scala javalibExTestSuite/test &&
+    sbtretry 'set scalaJSStage in Global := FullOptStage' \
         ++$scala javalibExTestSuite/test &&
-    sbt ++$scala testSuite/test:doc compiler/test reversi/fastOptJS reversi/fullOptJS &&
-    sbt ++$scala partest/fetchScalaSource &&
-    sbt ++$scala library/mimaReportBinaryIssues testInterface/mimaReportBinaryIssues &&
+    sbtretry ++$scala testSuite/test:doc compiler/test reversi/fastOptJS reversi/fullOptJS &&
+    sbtretry ++$scala compiler/compile:doc library/compile:doc javalibEx/compile:doc \
+        testInterface/compile:doc &&
+    sbtretry ++$scala partest/fetchScalaSource &&
+    sbtretry ++$scala library/mimaReportBinaryIssues testInterface/mimaReportBinaryIssues &&
     sh ci/checksizes.sh $scala &&
     sh ci/check-partest-coverage.sh $scala
   ]]></task>
 
-  <task id="bootstrap"><![CDATA[
-    export JAVA_HOME=$HOME/apps/java-$java
-    sbt 'set scalaJSStage in Global := FastOptStage' \
-        ++$scala toolsJS/test \
+  <task id="test-suite-ecma-script5"><![CDATA[
+    setJavaVersion $java
+    sbtretry ++$scala jUnitTestOutputsJVM/test jUnitTestOutputsJS/test \
+        'set scalaJSStage in Global := FullOptStage' jUnitTestOutputsJS/test &&
+    sbtretry ++$scala 'set scalaJSUseRhino in Global := true' jUnitTestOutputsJS/test &&
+    sbtretry ++$scala 'set scalaJSUseRhino in Global := true' $testSuite/test &&
+    sbtretry ++$scala $testSuite/test &&
+    sbtretry 'set scalaJSStage in Global := FullOptStage' \
+        ++$scala $testSuite/test \
+        $testSuite/clean &&
+    sbtretry 'set requiresDOM in $testSuite := true' \
+        ++$scala $testSuite/test &&
+    sbtretry 'set requiresDOM in $testSuite := true' \
         'set scalaJSStage in Global := FullOptStage' \
-        ++$scala toolsJS/test \
-        irJS/mimaReportBinaryIssues toolsJS/mimaReportBinaryIssues
+        ++$scala $testSuite/test \
+        $testSuite/clean &&
+    sbtretry ++$scala 'set scalaJSUseRhino in Global := true' noIrCheckTest/test &&
+    sbtretry ++$scala noIrCheckTest/test &&
+    sbtretry 'set scalaJSStage in Global := FullOptStage' \
+        ++$scala noIrCheckTest/test \
+        noIrCheckTest/clean &&
+    sbtretry 'set scalaJSOptimizerOptions in $testSuite ~= (_.withDisableOptimizer(true))' \
+        'set scalaJSUseRhino in Global := true' \
+        ++$scala $testSuite/test &&
+    sbtretry 'set scalaJSOptimizerOptions in $testSuite ~= (_.withDisableOptimizer(true))' \
+        ++$scala $testSuite/test \
+        $testSuite/clean &&
+    sbtretry 'set scalaJSSemantics in $testSuite ~= makeCompliant' \
+        'set scalaJSUseRhino in Global := true' \
+        ++$scala $testSuite/test &&
+    sbtretry 'set scalaJSSemantics in $testSuite ~= makeCompliant' \
+        ++$scala $testSuite/test &&
+    sbtretry 'set scalaJSSemantics in $testSuite ~= makeCompliant' \
+        'set scalaJSStage in Global := FullOptStage' \
+        ++$scala $testSuite/test \
+        $testSuite/clean &&
+    sbtretry 'set scalaJSSemantics in $testSuite ~= makeCompliant' \
+        'set scalaJSOptimizerOptions in $testSuite ~= (_.withDisableOptimizer(true))' \
+        'set scalaJSUseRhino in Global := true' \
+        ++$scala $testSuite/test &&
+    sbtretry 'set scalaJSSemantics in $testSuite ~= makeCompliant' \
+        'set scalaJSOptimizerOptions in $testSuite ~= (_.withDisableOptimizer(true))' \
+        ++$scala $testSuite/test \
+        $testSuite/clean &&
+    sbtretry 'set inScope(ThisScope in $testSuite)(jsEnv := new org.scalajs.jsenv.RetryingComJSEnv(PhantomJSEnv().value))' \
+        'set parallelExecution in ($testSuite, Test) := false' \
+        ++$scala $testSuite/test &&
+    sbtretry 'set inScope(ThisScope in $testSuite)(jsEnv := new org.scalajs.jsenv.RetryingComJSEnv(PhantomJSEnv().value))' \
+        'set parallelExecution in ($testSuite, Test) := false' \
+        'set scalaJSStage in Global := FullOptStage' \
+        ++$scala $testSuite/test \
+        $testSuite/clean &&
+    sbtretry 'set scalacOptions in $testSuite += "-Xexperimental"' \
+        'set scalaJSUseRhino in Global := true' \
+        ++$scala $testSuite/test &&
+    sbtretry 'set scalacOptions in $testSuite += "-Xexperimental"' \
+        ++$scala $testSuite/test &&
+    sbtretry 'set scalacOptions in $testSuite += "-Xexperimental"' \
+        'set scalaJSStage in Global := FullOptStage' \
+        ++$scala $testSuite/test &&
+    sbtretry 'set scalaJSModuleKind in $testSuite := ModuleKind.CommonJSModule' \
+        ++$scala $testSuite/test &&
+    sbtretry 'set scalaJSModuleKind in $testSuite := ModuleKind.CommonJSModule' \
+        'set scalaJSStage in Global := FullOptStage' \
+        ++$scala $testSuite/test
+  ]]></task>
+
+  <task id="test-suite-ecma-script6"><![CDATA[
+    setJavaVersion $java
+    sbtretry 'set scalaJSOutputMode in $testSuite := org.scalajs.core.tools.linker.backend.OutputMode.ECMAScript6' \
+        'set jsEnv in $testSuite := NodeJSEnv().value.withSourceMap(false)' \
+        ++$scala $testSuite/test \
+        $testSuite/clean &&
+    sbtretry 'set scalaJSOutputMode in noIrCheckTest := org.scalajs.core.tools.linker.backend.OutputMode.ECMAScript6' \
+        'set jsEnv in noIrCheckTest := NodeJSEnv().value.withSourceMap(false)' \
+        ++$scala noIrCheckTest/test \
+        noIrCheckTest/clean &&
+    sbtretry 'set scalaJSOutputMode in $testSuite := org.scalajs.core.tools.linker.backend.OutputMode.ECMAScript6' \
+        'set jsEnv in $testSuite := NodeJSEnv().value.withSourceMap(false)' \
+        'set scalaJSOptimizerOptions in $testSuite ~= (_.withDisableOptimizer(true))' \
+        ++$scala $testSuite/test \
+        $testSuite/clean &&
+    sbtretry 'set scalaJSOutputMode in $testSuite := org.scalajs.core.tools.linker.backend.OutputMode.ECMAScript6' \
+        'set jsEnv in $testSuite := NodeJSEnv().value.withSourceMap(false)' \
+        'set scalaJSSemantics in $testSuite ~= makeCompliant' \
+        ++$scala $testSuite/test \
+        $testSuite/clean &&
+    sbtretry 'set scalaJSOutputMode in $testSuite := org.scalajs.core.tools.linker.backend.OutputMode.ECMAScript6' \
+        'set jsEnv in $testSuite := NodeJSEnv().value.withSourceMap(false)' \
+        'set scalaJSSemantics in $testSuite ~= makeCompliant' \
+        'set scalaJSOptimizerOptions in $testSuite ~= (_.withDisableOptimizer(true))' \
+        ++$scala $testSuite/test \
+        $testSuite/clean &&
+    sbtretry 'set scalaJSOutputMode in $testSuite := org.scalajs.core.tools.linker.backend.OutputMode.ECMAScript6' \
+        'set jsEnv in $testSuite := NodeJSEnv().value.withSourceMap(false)' \
+        'set scalaJSStage in Global := FullOptStage' \
+        ++$scala $testSuite/test \
+        $testSuite/clean &&
+    sbtretry 'set scalaJSOutputMode in $testSuite := org.scalajs.core.tools.linker.backend.OutputMode.ECMAScript6' \
+        'set jsEnv in $testSuite := NodeJSEnv().value.withSourceMap(false)' \
+        'set scalaJSStage in Global := FullOptStage' \
+        'set scalaJSOptimizerOptions in $testSuite ~= (_.withDisableOptimizer(true))' \
+        ++$scala $testSuite/test \
+        $testSuite/clean &&
+    sbtretry 'set scalaJSOutputMode in $testSuite := org.scalajs.core.tools.linker.backend.OutputMode.ECMAScript6' \
+        'set jsEnv in $testSuite := NodeJSEnv().value.withSourceMap(false)' \
+        'set scalaJSModuleKind in $testSuite := ModuleKind.CommonJSModule' \
+        ++$scala $testSuite/test &&
+    sbtretry 'set scalaJSOutputMode in $testSuite := org.scalajs.core.tools.linker.backend.OutputMode.ECMAScript6' \
+        'set jsEnv in $testSuite := NodeJSEnv().value.withSourceMap(false)' \
+        'set scalaJSModuleKind in $testSuite := ModuleKind.CommonJSModule' \
+        'set scalaJSStage in Global := FullOptStage' \
+        ++$scala $testSuite/test
+  ]]></task>
+
+  <task id="bootstrap"><![CDATA[
+    setJavaVersion $java
+    sbt 'set jsEnv in toolsJS := NodeJSEnv(args = Seq("--max_old_space_size=2048")).value.withSourceMap(false)' \
+        ++$scala irJS/test toolsJS/test &&
+    sbt 'set jsEnv in toolsJS := NodeJSEnv(args = Seq("--max_old_space_size=2048")).value.withSourceMap(false)' \
+        'set scalaJSStage in Global := FullOptStage' \
+        ++$scala irJS/test toolsJS/test
   ]]></task>
 
   <task id="tools-cli-stubs"><![CDATA[
-    export JAVA_HOME=$HOME/apps/java-$java
-    sbt ++$scala tools/package tools/test cli/assembly stubs/package \
-        jsEnvs/test \
+    setJavaVersion $java
+    sbt ++$scala tools/package ir/test tools/test cli/package cli/assembly \
+        stubs/package jsEnvsTestSuite/test \
         ir/mimaReportBinaryIssues tools/mimaReportBinaryIssues \
-        jsEnvs/mimaReportBinaryIssues testAdapter/mimaReportBinaryIssues \
-        stubs/mimaReportBinaryIssues
+        jsEnvs/mimaReportBinaryIssues jsEnvsTestKit/mimaReportBinaryIssues \
+        testAdapter/mimaReportBinaryIssues \
+        stubs/mimaReportBinaryIssues cli/mimaReportBinaryIssues \
+        irJS/mimaReportBinaryIssues toolsJS/mimaReportBinaryIssues &&
+    sbt ++$scala ir/compile:doc tools/compile:doc jsEnvs/compile:doc \
+        jsEnvsTestKit/compile:doc testAdapter/compile:doc stubs/compile:doc
   ]]></task>
 
   <task id="tools-cli-stubs-sbtplugin"><![CDATA[
-    export JAVA_HOME=$HOME/apps/java-$java
-    sbt ++$scala tools/package tools/test cli/assembly stubs/package \
-        sbtPlugin/package jsEnvs/test \
+    setJavaVersion $java
+    sbt ++$scala tools/package ir/test tools/test cli/package cli/assembly \
+        stubs/package jsEnvsTestSuite/test \
+        sbtPlugin/package \
         ir/mimaReportBinaryIssues tools/mimaReportBinaryIssues \
-        jsEnvs/mimaReportBinaryIssues testAdapter/mimaReportBinaryIssues \
-        sbtPlugin/mimaReportBinaryIssues stubs/mimaReportBinaryIssues
+        jsEnvs/mimaReportBinaryIssues jsEnvsTestKit/mimaReportBinaryIssues \
+        testAdapter/mimaReportBinaryIssues \
+        stubs/mimaReportBinaryIssues cli/mimaReportBinaryIssues \
+        sbtPlugin/mimaReportBinaryIssues \
+        irJS/mimaReportBinaryIssues toolsJS/mimaReportBinaryIssues &&
+    sbt ++$scala library/scalastyle javalanglib/scalastyle javalib/scalastyle \
+        javalibEx/scalastyle ir/scalastyle compiler/scalastyle \
+        compiler/test:scalastyle tools/scalastyle tools/test:scalastyle \
+        jsEnvs/scalastyle jsEnvsTestKit/scalastyle \
+        jsEnvsTestSuite/test:scalastyle testAdapter/scalastyle \
+        sbtPlugin/scalastyle testInterface/scalastyle \
+        testSuite/test:scalastyle \
+        testSuiteJVM/test:scalastyle \
+        javalibExTestSuite/test:scalastyle helloworld/scalastyle \
+        reversi/scalastyle testingExample/scalastyle \
+        testingExample/test:scalastyle \
+        jUnitPlugin/scalastyle jUnitRuntime/scalastyle \
+        jUnitTestOutputsJVM/scalastyle jUnitTestOutputsJVM/test:scalastyle \
+        jUnitTestOutputsJS/scalastyle jUnitTestOutputsJS/test:scalastyle &&
+    sbt ++$scala ir/compile:doc tools/compile:doc jsEnvs/compile:doc \
+        jsEnvsTestKit/compile:doc testAdapter/compile:doc stubs/compile:doc \
+        sbtPlugin/compile:doc
   ]]></task>
 
   <task id="partestc"><![CDATA[
-    export JAVA_HOME=$HOME/apps/java-$java
+    setJavaVersion $java
     sbt ++$scala partest/compile
   ]]></task>
 
   <task id="sbtplugin-test"><![CDATA[
     # Publish Scala.js artifacts locally
-    sbt ++2.11.5 compiler/publishLocal library/publishLocal javalibEx/publishLocal \
-                 testInterface/publishLocal jasmineTestFramework/publishLocal stubs/publishLocal \
-        ++2.10.4 ir/publishLocal tools/publishLocal jsEnvs/publishLocal \
-                 testAdapter/publishLocal sbtPlugin/publishLocal
-    # Go into standalone project and test
-    cd sbt-plugin-test
-    sbt noDOM/run withDOM/run test \
-        'set scalaJSStage in Global := FastOptStage' \
-        jetty9/run test
+    # Then go into standalone project and test
+    sbt ++2.11.8 compiler/publishLocal library/publishLocal javalibEx/publishLocal \
+                 testInterface/publishLocal stubs/publishLocal \
+                 jUnitPlugin/publishLocal jUnitRuntime/publishLocal &&
+    sbt ++2.10.6 ir/publishLocal tools/publishLocal jsEnvs/publishLocal \
+                 testAdapter/publishLocal sbtPlugin/publishLocal &&
+    cd sbt-plugin-test &&
+    sbt noDOM/run noDOM/testHtmlFastOpt noDOM/testHtmlFullOpt \
+        withDOM/run withDOM/testHtmlFastOpt withDOM/testHtmlFullOpt \
+        multiTestJS/test:run multiTestJS/testHtmlFastOpt multiTestJS/testHtmlFullOpt \
+        jetty9/run test \
+        jsDependenciesTest/packageJSDependencies \
+        jsDependenciesTest/packageMinifiedJSDependencies \
+        jsDependenciesTest/regressionTestForIssue2243 \
+        jsNoDependenciesTest/regressionTestForIssue2243 \
+        multiTestJS/test:testScalaJSSourceMapAttribute \
+        'set scalaJSUseRhino in Global := true' test
   ]]></task>
 
   <task id="partest-noopt"><![CDATA[
-    export JAVA_HOME=$HOME/apps/java-$java
+    setJavaVersion $java
     sbt ++$scala package "partestSuite/testOnly -- --showDiff"
   ]]></task>
 
   <task id="partest-fastopt"><![CDATA[
-    export JAVA_HOME=$HOME/apps/java-$java
+    setJavaVersion $java
     sbt ++$scala package "partestSuite/testOnly -- --fastOpt --showDiff"
   ]]></task>
 
   <task id="partest-fullopt"><![CDATA[
-    export JAVA_HOME=$HOME/apps/java-$java
+    setJavaVersion $java
     sbt ++$scala package "partestSuite/testOnly -- --fullOpt --showDiff"
   ]]></task>
 
   <matrix id="pr">
-    <!-- Main test tasks -->
+    <!-- Main test tasks, on all JDKs -->
     <run task="main">
       <v n="scala">2.10.2</v>
       <v n="java">1.6</v>
@@ -162,62 +296,118 @@
       <v n="java">1.8</v>
     </run>
     <run task="main">
-      <v n="scala">2.11.5</v>
+      <v n="scala">2.11.8</v>
       <v n="java">1.6</v>
     </run>
     <run task="main">
-      <v n="scala">2.11.5</v>
+      <v n="scala">2.11.8</v>
       <v n="java">1.7</v>
     </run>
     <run task="main">
-      <v n="scala">2.11.5</v>
+      <v n="scala">2.11.8</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="main">
+      <v n="scala">2.12.1</v>
       <v n="java">1.8</v>
     </run>
 
-    <!-- Bootstrap test tasks -->
-    <run task="bootstrap">
-      <v n="scala">2.10.2</v>
-      <v n="java">1.6</v>
-    </run>
-    <run task="bootstrap">
-      <v n="scala">2.10.2</v>
-      <v n="java">1.7</v>
-    </run>
-    <run task="bootstrap">
+    <!-- Test suite on ECMAScript5 tasks, only on JDK8 -->
+    <run task="test-suite-ecma-script5">
       <v n="scala">2.10.2</v>
       <v n="java">1.8</v>
+      <v n="testSuite">testSuite</v>
     </run>
-    <!-- Tools do not compile on JDK6, Scala 2.11.x (see #1235) -->
-    <run task="bootstrap">
-      <v n="scala">2.11.5</v>
-      <v n="java">1.7</v>
-    </run>
-    <run task="bootstrap">
-      <v n="scala">2.11.5</v>
+    <run task="test-suite-ecma-script5">
+      <v n="scala">2.11.8</v>
       <v n="java">1.8</v>
+      <v n="testSuite">testSuite</v>
     </run>
-    <!-- Tools do not compile on Scala 2.11.4 (see #1215). -->
+    <run task="test-suite-ecma-script5">
+      <v n="scala">2.12.1</v>
+      <v n="java">1.8</v>
+      <v n="testSuite">testSuite</v>
+    </run>
 
-    <!-- Tools / CLI / Stubs / sbtPlugin test tasks -->
+    <!-- scala/scala test suite on ECMAScript5 tasks, only on JDK8 -->
+    <run task="test-suite-ecma-script5">
+      <v n="scala">2.11.8</v>
+      <v n="java">1.8</v>
+      <v n="testSuite">scalaTestSuite</v>
+    </run>
+    <run task="test-suite-ecma-script5">
+      <v n="scala">2.12.1</v>
+      <v n="java">1.8</v>
+      <v n="testSuite">scalaTestSuite</v>
+    </run>
+
+    <!-- Test suite on ECMAScript6 tasks, only on JDK8 -->
+    <run task="test-suite-ecma-script6">
+      <v n="scala">2.10.2</v>
+      <v n="java">1.8</v>
+      <v n="testSuite">testSuite</v>
+    </run>
+    <run task="test-suite-ecma-script6">
+      <v n="scala">2.11.8</v>
+      <v n="java">1.8</v>
+      <v n="testSuite">testSuite</v>
+    </run>
+    <run task="test-suite-ecma-script6">
+      <v n="scala">2.12.1</v>
+      <v n="java">1.8</v>
+      <v n="testSuite">testSuite</v>
+    </run>
+
+    <!-- scala/scala test suite on ECMAScript6 tasks, only on JDK8 -->
+    <run task="test-suite-ecma-script6">
+      <v n="scala">2.11.8</v>
+      <v n="java">1.8</v>
+      <v n="testSuite">scalaTestSuite</v>
+    </run>
+    <run task="test-suite-ecma-script6">
+      <v n="scala">2.12.1</v>
+      <v n="java">1.8</v>
+      <v n="testSuite">scalaTestSuite</v>
+    </run>
+
+    <!-- Bootstrap test tasks, only on JDK8 -->
+    <run task="bootstrap">
+      <v n="scala">2.10.2</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="bootstrap">
+      <v n="scala">2.11.8</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="bootstrap">
+      <v n="scala">2.12.1</v>
+      <v n="java">1.8</v>
+    </run>
+
+    <!-- Tools / CLI / Stubs / sbtPlugin test tasks, on all JDKs -->
     <run task="tools-cli-stubs-sbtplugin">
-      <v n="scala">2.10.4</v>
+      <v n="scala">2.10.6</v>
       <v n="java">1.6</v>
     </run>
     <run task="tools-cli-stubs-sbtplugin">
-      <v n="scala">2.10.4</v>
+      <v n="scala">2.10.6</v>
       <v n="java">1.7</v>
     </run>
     <run task="tools-cli-stubs-sbtplugin">
-      <v n="scala">2.10.4</v>
+      <v n="scala">2.10.6</v>
       <v n="java">1.8</v>
     </run>
     <!-- Tools do not compile on JDK6, Scala 2.11.x (see #1235) -->
     <run task="tools-cli-stubs">
-      <v n="scala">2.11.5</v>
+      <v n="scala">2.11.8</v>
       <v n="java">1.7</v>
     </run>
     <run task="tools-cli-stubs">
-      <v n="scala">2.11.5</v>
+      <v n="scala">2.11.8</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="tools-cli-stubs">
+      <v n="scala">2.12.1</v>
       <v n="java">1.8</v>
     </run>
 
@@ -226,9 +416,15 @@
       <v n="scala">2.11.0</v>
       <v n="java">1.7</v>
     </run>
-    <run task="partestc">
-      <v n="scala">2.11.5</v>
+
+    <!-- Partest fastOpt -->
+    <run task="partest-fastopt">
+      <v n="scala">2.11.8</v>
       <v n="java">1.7</v>
+    </run>
+    <run task="partest-fastopt">
+      <v n="scala">2.12.1</v>
+      <v n="java">1.8</v>
     </run>
 
     <run task="sbtplugin-test" />
@@ -237,38 +433,30 @@
   <matrix id="nightly">
     <run matrix="pr" />
 
-    <!-- Main test tasks (all remaining Scala versions) -->
+    <!-- Main test tasks (all remaining Scala versions, only on JDK8) -->
     <run task="main">
       <v n="scala">2.10.3</v>
-      <v n="java">1.7</v>
+      <v n="java">1.8</v>
     </run>
     <run task="main">
       <v n="scala">2.10.4</v>
-      <v n="java">1.6</v>
+      <v n="java">1.8</v>
     </run>
     <run task="main">
-      <v n="scala">2.10.4</v>
-      <v n="java">1.7</v>
+      <v n="scala">2.10.5</v>
+      <v n="java">1.8</v>
     </run>
     <run task="main">
-      <v n="scala">2.10.4</v>
+      <v n="scala">2.10.6</v>
       <v n="java">1.8</v>
     </run>
     <run task="main">
       <v n="scala">2.11.0</v>
-      <v n="java">1.7</v>
+      <v n="java">1.8</v>
     </run>
     <run task="main">
       <v n="scala">2.11.1</v>
-      <v n="java">1.7</v>
-    </run>
-    <run task="main">
-      <v n="scala">2.11.2</v>
-      <v n="java">1.6</v>
-    </run>
-    <run task="main">
-      <v n="scala">2.11.2</v>
-      <v n="java">1.7</v>
+      <v n="java">1.8</v>
     </run>
     <run task="main">
       <v n="scala">2.11.2</v>
@@ -276,63 +464,85 @@
     </run>
     <run task="main">
       <v n="scala">2.11.4</v>
-      <v n="java">1.6</v>
+      <v n="java">1.8</v>
     </run>
     <run task="main">
-      <v n="scala">2.11.4</v>
-      <v n="java">1.7</v>
+      <v n="scala">2.11.5</v>
+      <v n="java">1.8</v>
     </run>
     <run task="main">
-      <v n="scala">2.11.4</v>
+      <v n="scala">2.11.6</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="main">
+      <v n="scala">2.11.7</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="main">
+      <v n="scala">2.12.0</v>
       <v n="java">1.8</v>
     </run>
 
-    <!-- Bootstrap test tasks (all remaining Scala versions) -->
-    <run task="bootstrap">
-      <v n="scala">2.10.3</v>
-      <v n="java">1.7</v>
-    </run>
-    <run task="bootstrap">
-      <v n="scala">2.10.4</v>
+    <!-- Test suite on ECMAScript5 tasks on JDK6 and 7 -->
+    <run task="test-suite-ecma-script5">
+      <v n="scala">2.10.2</v>
       <v n="java">1.6</v>
+      <v n="testSuite">testSuite</v>
     </run>
-    <run task="bootstrap">
-      <v n="scala">2.10.4</v>
+    <run task="test-suite-ecma-script5">
+      <v n="scala">2.10.2</v>
       <v n="java">1.7</v>
+      <v n="testSuite">testSuite</v>
     </run>
-    <run task="bootstrap">
-      <v n="scala">2.10.4</v>
-      <v n="java">1.8</v>
+    <run task="test-suite-ecma-script5">
+      <v n="scala">2.11.8</v>
+      <v n="java">1.6</v>
+      <v n="testSuite">testSuite</v>
     </run>
-    <run task="bootstrap">
-      <v n="scala">2.11.0</v>
+    <run task="test-suite-ecma-script5">
+      <v n="scala">2.11.8</v>
       <v n="java">1.7</v>
+      <v n="testSuite">testSuite</v>
     </run>
-    <run task="bootstrap">
-      <v n="scala">2.11.1</v>
-      <v n="java">1.7</v>
-    </run>
-    <run task="bootstrap">
-      <v n="scala">2.11.2</v>
-      <v n="java">1.7</v>
-    </run>
-    <run task="bootstrap">
-      <v n="scala">2.11.2</v>
-      <v n="java">1.8</v>
-    </run>
-    <!-- Tools do not compile on Scala 2.11.4 (see #1215). -->
 
+    <!-- Test suite on ECMAScript6 tasks on JDK6 and 7 -->
+    <run task="test-suite-ecma-script6">
+      <v n="scala">2.10.2</v>
+      <v n="java">1.6</v>
+      <v n="testSuite">testSuite</v>
+    </run>
+    <run task="test-suite-ecma-script6">
+      <v n="scala">2.10.2</v>
+      <v n="java">1.7</v>
+      <v n="testSuite">testSuite</v>
+    </run>
+    <run task="test-suite-ecma-script6">
+      <v n="scala">2.11.8</v>
+      <v n="java">1.6</v>
+      <v n="testSuite">testSuite</v>
+    </run>
+    <run task="test-suite-ecma-script6">
+      <v n="scala">2.11.8</v>
+      <v n="java">1.7</v>
+      <v n="testSuite">testSuite</v>
+    </run>
+
+    <!-- Partest noOpt and fullOpt -->
     <run task="partest-noopt">
-      <v n="scala">2.11.5</v>
-      <v n="java">1.7</v>
-    </run>
-    <run task="partest-fastopt">
-      <v n="scala">2.11.5</v>
+      <v n="scala">2.11.8</v>
       <v n="java">1.7</v>
     </run>
     <run task="partest-fullopt">
-      <v n="scala">2.11.5</v>
+      <v n="scala">2.11.8</v>
       <v n="java">1.7</v>
+    </run>
+    <run task="partest-noopt">
+      <v n="scala">2.12.1</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="partest-fullopt">
+      <v n="scala">2.12.1</v>
+      <v n="java">1.8</v>
     </run>
   </matrix>
 
@@ -341,39 +551,27 @@
 
     <run task="partest-noopt">
       <v n="scala">2.11.0</v>
-      <v n="java">1.7</v>
+      <v n="java">1.8</v>
     </run>
     <run task="partest-fastopt">
       <v n="scala">2.11.0</v>
-      <v n="java">1.7</v>
+      <v n="java">1.8</v>
     </run>
     <run task="partest-fullopt">
       <v n="scala">2.11.0</v>
-      <v n="java">1.7</v>
+      <v n="java">1.8</v>
     </run>
     <run task="partest-noopt">
       <v n="scala">2.11.1</v>
-      <v n="java">1.7</v>
+      <v n="java">1.8</v>
     </run>
     <run task="partest-fastopt">
       <v n="scala">2.11.1</v>
-      <v n="java">1.7</v>
+      <v n="java">1.8</v>
     </run>
     <run task="partest-fullopt">
       <v n="scala">2.11.1</v>
-      <v n="java">1.7</v>
-    </run>
-    <run task="partest-noopt">
-      <v n="scala">2.11.2</v>
-      <v n="java">1.7</v>
-    </run>
-    <run task="partest-fastopt">
-      <v n="scala">2.11.2</v>
-      <v n="java">1.7</v>
-    </run>
-    <run task="partest-fullopt">
-      <v n="scala">2.11.2</v>
-      <v n="java">1.7</v>
+      <v n="java">1.8</v>
     </run>
     <run task="partest-noopt">
       <v n="scala">2.11.2</v>
@@ -400,10 +598,66 @@
       <v n="scala">2.11.5</v>
       <v n="java">1.8</v>
     </run>
-    <!--
-        Partest does sometimes not compile on JDK6 (see #1227) we
-        therefore do not run any JDK6 partests.
-      -->
+    <run task="partest-noopt">
+      <v n="scala">2.11.6</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="partest-fastopt">
+      <v n="scala">2.11.6</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="partest-fullopt">
+      <v n="scala">2.11.6</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="partest-noopt">
+      <v n="scala">2.11.6</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="partest-fastopt">
+      <v n="scala">2.11.6</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="partest-fullopt">
+      <v n="scala">2.11.6</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="partest-noopt">
+      <v n="scala">2.11.7</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="partest-fastopt">
+      <v n="scala">2.11.7</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="partest-fullopt">
+      <v n="scala">2.11.7</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="partest-noopt">
+      <v n="scala">2.11.8</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="partest-fastopt">
+      <v n="scala">2.11.8</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="partest-fullopt">
+      <v n="scala">2.11.8</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="partest-noopt">
+      <v n="scala">2.12.0</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="partest-fastopt">
+      <v n="scala">2.12.0</v>
+      <v n="java">1.8</v>
+    </run>
+    <run task="partest-fullopt">
+      <v n="scala">2.12.0</v>
+      <v n="java">1.8</v>
+    </run>
   </matrix>
 
 </ci>

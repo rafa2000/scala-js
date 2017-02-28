@@ -24,6 +24,7 @@ import annotation.{JSBracketAccess, JSBracketCall}
  *  dynamically typed way. You can read and write any field, call any method,
  *  apply any JavaScript operator to values of this type.
  */
+@native
 sealed trait Dynamic extends Any with scala.Dynamic {
   /** Calls a method of this object. */
   @JSBracketCall
@@ -86,7 +87,7 @@ object Dynamic {
    *  returns the JavaScript object
    *    {foo: 3, bar: "foobar"}
    */
-  object literal extends scala.Dynamic {
+  object literal extends scala.Dynamic { // scalastyle:ignore
     /** literal creation like this:
      *  js.Dynamic.literal(name1 = "value", name2 = "value")
      */

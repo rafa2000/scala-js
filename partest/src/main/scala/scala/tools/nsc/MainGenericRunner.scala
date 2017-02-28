@@ -3,23 +3,22 @@ package scala.tools.nsc
 /* Super hacky overriding of the MainGenericRunner used by partest */
 
 import org.scalajs.core.tools.sem.Semantics
-import org.scalajs.core.tools.classpath._
-import org.scalajs.core.tools.classpath.builder._
 import org.scalajs.core.tools.logging._
 import org.scalajs.core.tools.io._
-import org.scalajs.core.tools.optimizer.ScalaJSOptimizer
-import org.scalajs.core.tools.optimizer.ScalaJSClosureOptimizer
-import org.scalajs.core.tools.optimizer.ParIncOptimizer
+import org.scalajs.core.tools.jsdep.ResolvedJSDependency
+import org.scalajs.core.tools.io.IRFileCache.IRContainer
+import org.scalajs.core.tools.linker.Linker
+import org.scalajs.core.tools.linker.backend.{OutputMode, ModuleKind}
 
 import org.scalajs.core.ir
 
 import org.scalajs.jsenv.JSConsole
-import org.scalajs.jsenv.rhino.RhinoJSEnv
 import org.scalajs.jsenv.nodejs.NodeJSEnv
 
 import scala.tools.partest.scalajs.ScalaJSPartestOptions._
 
 import java.io.File
+import java.net.URL
 import scala.io.Source
 
 import Properties.{ versionString, copyrightString }
@@ -40,21 +39,6 @@ class MainGenericRunner {
   }
 
   val optMode = OptMode.fromId(sys.props("scalajs.partest.optMode"))
-
-  def noWarnMissing = {
-    import ScalaJSOptimizer._
-
-    for {
-      fname <- sys.props.get("scalajs.partest.noWarnFile").toList
-      line  <- Source.fromFile(fname).getLines
-      if !line.startsWith("#")
-    } yield line.split('.') match {
-      case Array(className) =>
-        NoWarnMissing.Class(className)
-      case Array(className, methodName) =>
-        NoWarnMissing.Method(className, methodName)
-    }
-  }
 
   def readSemantics() = {
     val opt = sys.props.get("scalajs.partest.compliantSems")
@@ -77,77 +61,37 @@ class MainGenericRunner {
     val logger = new ScalaConsoleLogger(Level.Warn)
     val jsConsole = new ScalaConsoleJSConsole
     val semantics = readSemantics()
-    val classpath = createClasspath(command)
+    val ir = (
+        loadIR(command.settings.classpathURLs) :+
+        runnerIR(command.thingToRun, command.arguments)
+    )
+
+    val linkerConfig = Linker.Config()
+      .withSourceMap(false)
+      .withClosureCompiler(optMode == FullOpt)
+
+    val linker = Linker(semantics, OutputMode.ECMAScript51Isolated,
+        ModuleKind.NoModule, linkerConfig)
+
+    val sjsCode = {
+      val output = WritableMemVirtualJSFile("partest.js")
+      linker.link(ir, output, logger)
+      ResolvedJSDependency.minimal(output) :: Nil
+    }
 
     val jsRunner = new MemVirtualJSFile("launcher.js")
       .withContent(s"PartestLauncher().launch();")
 
-    val env =
-      if (optMode == NoOpt) new RhinoJSEnv(semantics)
-      else new NodeJSEnv
-
-    val runClasspath = optMode match {
-      case NoOpt   => classpath
-      case FastOpt => fastOptimize(classpath, logger, semantics)
-      case FullOpt => fullOptimize(classpath, logger, semantics.optimized)
-    }
-
-    env.jsRunner(runClasspath, jsRunner, logger, jsConsole).run()
+    new NodeJSEnv().jsRunner(sjsCode, jsRunner).run(logger, jsConsole)
 
     true
   }
 
-  private def fastOptimize(classpath: IRClasspath,
-      logger: Logger, semantics: Semantics) = {
-    import ScalaJSOptimizer._
-
-    val optimizer = newScalaJSOptimizer(semantics)
-    val output = WritableMemVirtualJSFile("partest-fastOpt.js")
-
-    optimizer.optimizeCP(
-        classpath,
-        Config(
-            output        = output,
-            wantSourceMap = false,
-            checkIR       = true,
-            noWarnMissing = noWarnMissing),
-        logger)
-  }
-
-  private def fullOptimize(classpath: IRClasspath, logger: Logger,
-      semantics: Semantics) = {
-    import ScalaJSClosureOptimizer._
-
-    val fastOptimizer = newScalaJSOptimizer(semantics)
-    val fullOptimizer = new ScalaJSClosureOptimizer(semantics)
-    val output = WritableMemVirtualJSFile("partest-fullOpt.js")
-
-    fullOptimizer.optimizeCP(fastOptimizer,
-        classpath,
-        Config(
-          output,
-          checkIR = true,
-          wantSourceMap = false,
-          noWarnMissing = noWarnMissing),
-        logger)
-  }
-
-  private def createClasspath(command: GenericRunnerCommand) = {
-    // Load basic Scala.js classpath (used for running or further packaging)
-    val usefulClasspathEntries = (for {
-      url <- command.settings.classpathURLs
-      f = urlToFile(url)
-      if (f.isDirectory || f.getName.startsWith("scalajs-library"))
-    } yield f).toList
-
-    val baseClasspath = PartialClasspathBuilder.build(usefulClasspathEntries)
-
-    // Create a classpath with the launcher object
-    val irFile = runnerIR(command.thingToRun, command.arguments)
-    val launcherClasspath =
-      new PartialClasspath(Nil, Map.empty, irFile :: Nil, None)
-
-    (baseClasspath merge launcherClasspath).resolve()
+  private def loadIR(classpathURLs: Seq[URL]) = {
+    val irContainers =
+      IRContainer.fromClasspath(classpathURLs.map(urlToFile))
+    val cache = (new IRFileCache).newCache
+    cache.cached(irContainers)
   }
 
   private def runnerIR(mainObj: String, args: List[String]) = {
@@ -156,7 +100,7 @@ class MainGenericRunner {
     import ir.Trees._
     import ir.Types._
 
-    val mainModuleClassName = ir.Definitions.encodeClassName(mainObj  + "$")
+    val mainModuleClassName = ir.Definitions.encodeClassName(mainObj + "$")
     val className = "PartestLauncher$"
     val exportName = "PartestLauncher"
     val encodedClassName = ir.Definitions.encodeClassName(className)
@@ -175,12 +119,16 @@ class MainGenericRunner {
             StringLiteral("launch"),
             Nil,
             AnyType,
-            Block(
-              Apply(LoadModule(ClassType(mainModuleClassName)),
-                Ident("main__AT__V"),
-                List(ArrayValue(ArrayType("T", 1), args.map(StringLiteral(_))))
-              )(NoType),
-              Undefined()
+            Some(
+              Block(
+                Apply(LoadModule(ClassType(mainModuleClassName)),
+                  Ident("main__AT__V"),
+                  List(
+                    ArrayValue(ArrayType("T", 1), args.map(StringLiteral(_)))
+                  )
+                )(NoType),
+                Undefined()
+              )
             )
           )(OptimizerHints.empty, None),
           ModuleExportDef(exportName)
@@ -198,9 +146,6 @@ class MainGenericRunner {
       def infoAndTree: (ClassInfo, ClassDef) = infoAndDefinition
     }
   }
-
-  private def newScalaJSOptimizer(semantics: Semantics) =
-    new ScalaJSOptimizer(semantics, ParIncOptimizer.factory)
 
   private def urlToFile(url: java.net.URL) = {
     try {

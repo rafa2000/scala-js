@@ -9,10 +9,12 @@
 
 package org.scalajs.testadapter
 
-import org.scalajs.core.tools.classpath._
+import org.scalajs.core.ir.Utils.escapeJS
+
 import org.scalajs.core.tools.io._
 import org.scalajs.core.tools.json._
 import org.scalajs.core.tools.logging._
+import org.scalajs.core.tools.linker.backend.ModuleKind
 
 import org.scalajs.jsenv._
 
@@ -20,11 +22,17 @@ import sbt.testing.{Logger => _, _}
 
 final class ScalaJSFramework(
     private[testadapter] val frameworkName: String,
-    jsEnv: ComJSEnv,
-    classpath: CompleteClasspath,
-    logger: Logger,
-    jsConsole: JSConsole
+    private[testadapter] val libEnv: ComJSEnv,
+    private[testadapter] val moduleKind: ModuleKind,
+    private[testadapter] val moduleIdentifier: Option[String],
+    private[testadapter] val logger: Logger,
+    private[testadapter] val jsConsole: JSConsole
 ) extends Framework {
+
+  def this(frameworkName: String, libEnv: ComJSEnv, logger: Logger,
+      jsConsole: JSConsole) = {
+    this(frameworkName, libEnv, ModuleKind.NoModule, None, logger, jsConsole)
+  }
 
   private[this] val frameworkInfo = fetchFrameworkInfo()
 
@@ -49,12 +57,9 @@ final class ScalaJSFramework(
 
   private[testadapter] def runDone(): Unit = synchronized(_isRunning = false)
 
-  private[testadapter] def createRunner(launcher: VirtualJSFile): ComJSRunner =
-    jsEnv.comRunner(classpath, launcher, logger, jsConsole)
-
   private def fetchFrameworkInfo() = {
-    val runner = createRunner(frameworkInfoLauncher)
-    runner.start()
+    val runner = libEnv.comRunner(frameworkInfoLauncher)
+    runner.start(logger, jsConsole)
 
     try {
       val msg = readJSON(runner.receive())
@@ -66,10 +71,26 @@ final class ScalaJSFramework(
   }
 
   private def frameworkInfoLauncher = {
+    val prefix = optionalExportsNamespacePrefix
     val name = jsonToString(frameworkName.toJSON)
     val code = s"""
-      new org.scalajs.testinterface.internal.InfoSender($name).initAndSend();
+      new ${prefix}org.scalajs.testinterface.internal.InfoSender($name).initAndSend();
     """
     new MemVirtualJSFile(s"testFrameworkInfo.js").withContent(code)
+  }
+
+  private[testadapter] def optionalExportsNamespacePrefix: String = {
+    // !!! DUPLICATE code with ScalaJSPlugin.makeExportsNamespaceExpr
+    moduleKind match {
+      case ModuleKind.NoModule =>
+        ""
+
+      case ModuleKind.CommonJSModule =>
+        val moduleIdent = moduleIdentifier.getOrElse {
+          throw new IllegalArgumentException(
+              "The module identifier must be specified for CommonJS modules")
+        }
+        s"""require("${escapeJS(moduleIdent)}").""" // note the final '.'
+    }
   }
 }

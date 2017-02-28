@@ -6,7 +6,7 @@
 package helloworld
 
 import scala.scalajs.js
-import js.annotation.JSName
+import js.annotation._
 
 object HelloWorld extends js.JSApp {
   def main() {
@@ -55,28 +55,34 @@ object HelloWorld extends js.JSApp {
   }
 }
 
-object window extends js.GlobalScope {
+@js.native
+@JSGlobalScope
+object window extends js.Object {
   val document: DOMDocument = js.native
 
   def alert(msg: String): Unit = js.native
 }
 
+@js.native
 trait DOMDocument extends js.Object {
   def getElementById(id: String): DOMElement = js.native
   def createElement(tag: String): DOMElement = js.native
 }
 
+@js.native
 trait DOMElement extends js.Object {
   var innerHTML: String = js.native
 
   def appendChild(child: DOMElement): Unit = js.native
 }
 
+@js.native
 @JSName("jQuery")
 object JQuery extends js.Object {
   def apply(selector: String): JQuery = js.native
 }
 
+@js.native
 trait JQuery extends js.Object {
   def text(value: String): JQuery = js.native
   def text(): String = js.native

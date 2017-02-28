@@ -36,8 +36,18 @@ object JavaLangObject {
           static = false,
           Ident("init___", Some("<init>")),
           Nil,
-          AnyType,
-          This()(ThisType))(OptimizerHints.empty, None),
+          NoType,
+          Some(Skip()))(OptimizerHints.empty, None),
+
+        /* def getClass(): java.lang.Class[_] = <getclass>(this) */
+        MethodDef(
+          static = false,
+          Ident("getClass__jl_Class", Some("getClass__jl_Class")),
+          Nil,
+          ClassType(ClassClass),
+          Some {
+            GetClass(This()(ThisType))
+          })(OptimizerHints.empty.withInline(true), None),
 
         /* def hashCode(): Int = System.identityHashCode(this) */
         MethodDef(
@@ -45,7 +55,7 @@ object JavaLangObject {
           Ident("hashCode__I", Some("hashCode__I")),
           Nil,
           IntType,
-          {
+          Some {
             Apply(
               LoadModule(ClassType("jl_System$")),
               Ident("identityHashCode__O__I", Some("identityHashCode")),
@@ -56,9 +66,10 @@ object JavaLangObject {
         MethodDef(
           static = false,
           Ident("equals__O__Z", Some("equals__O__Z")),
-          List(ParamDef(Ident("that", Some("that")), AnyType, mutable = false)),
+          List(ParamDef(Ident("that", Some("that")), AnyType,
+            mutable = false, rest = false)),
           BooleanType,
-          {
+          Some {
             BinaryOp(BinaryOp.===,
               This()(ThisType),
               VarRef(Ident("that", Some("that")))(AnyType))
@@ -73,7 +84,7 @@ object JavaLangObject {
           Ident("clone__O", Some("clone__O")),
           Nil,
           AnyType,
-          {
+          Some {
             If(IsInstanceOf(This()(ThisType), ClassType("jl_Cloneable")), {
               Apply(LoadModule(ClassType("sjsr_package$")),
                   Ident("cloneObject__sjs_js_Object__sjs_js_Object", Some("cloneObject")),
@@ -92,10 +103,12 @@ object JavaLangObject {
           Ident("toString__T", Some("toString__T")),
           Nil,
           ClassType(StringClass),
-          {
+          Some {
             BinaryOp(BinaryOp.String_+, BinaryOp(BinaryOp.String_+,
               Apply(
-                GetClass(This()(ThisType)),
+                Apply(This()(ThisType),
+                  Ident("getClass__jl_Class", Some("getClass__jl_Class")), Nil)(
+                  ClassType(ClassClass)),
                 Ident("getName__T"), Nil)(ClassType(StringClass)),
               // +
               StringLiteral("@")),
@@ -117,7 +130,7 @@ object JavaLangObject {
           Ident("notify__V", Some("notify__V")),
           Nil,
           NoType,
-          Skip())(OptimizerHints.empty, None),
+          Some(Skip()))(OptimizerHints.empty, None),
 
         /* def notifyAll(): Unit = () */
         MethodDef(
@@ -125,7 +138,7 @@ object JavaLangObject {
           Ident("notifyAll__V", Some("notifyAll__V")),
           Nil,
           NoType,
-          Skip())(OptimizerHints.empty, None),
+          Some(Skip()))(OptimizerHints.empty, None),
 
         /* def finalize(): Unit = () */
         MethodDef(
@@ -133,33 +146,7 @@ object JavaLangObject {
           Ident("finalize__V", Some("finalize__V")),
           Nil,
           NoType,
-          Skip())(OptimizerHints.empty, None),
-
-        /* Reflective proxies
-         * Note that we do not need to proxy the following methods, since
-         * they are defined on Any in the Scala hierarchy and therefore a
-         * reflective call is never emitted:
-         * - equals
-         * - getClass
-         * - hashCode
-         * - toString
-         */
-
-        MethodDef(static = false, Ident("clone__"), Nil, AnyType,
-          Apply(This()(ThisType), Ident("clone__O"), Nil)(AnyType))(
-          OptimizerHints.empty, None),
-
-        MethodDef(static = false, Ident("notify__"), Nil, AnyType, Block(
-          Apply(This()(ThisType), Ident("notify__V"), Nil)(NoType),
-          Undefined()))(OptimizerHints.empty, None),
-
-        MethodDef(static = false, Ident("notifyAll__"), Nil, AnyType, Block(
-          Apply(This()(ThisType), Ident("notifyAll__V"), Nil)(NoType),
-          Undefined()))(OptimizerHints.empty, None),
-
-        MethodDef(static = false, Ident("finalize__"), Nil, AnyType, Block(
-          Apply(This()(ThisType), Ident("finalize__V"), Nil)(NoType),
-          Undefined()))(OptimizerHints.empty, None),
+          Some(Skip()))(OptimizerHints.empty, None),
 
         // Exports
 
@@ -169,7 +156,7 @@ object JavaLangObject {
           StringLiteral("toString"),
           Nil,
           AnyType,
-          {
+          Some {
             Apply(This()(ThisType),
                 Ident("toString__T", Some("toString__T")),
                 Nil)(ClassType(StringClass))

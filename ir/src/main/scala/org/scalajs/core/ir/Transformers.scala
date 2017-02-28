@@ -53,9 +53,12 @@ object Transformers {
         case DoWhile(body, cond, label) =>
           DoWhile(transformStat(body), transformExpr(cond), label)
 
-        case Try(block, errVar, handler, finalizer) =>
-          Try(transform(block, isStat), errVar, transform(handler, isStat),
-              transformStat(finalizer))(tree.tpe)
+        case TryCatch(block, errVar, handler) =>
+          TryCatch(transform(block, isStat), errVar,
+              transform(handler, isStat))(tree.tpe)
+
+        case TryFinally(block, finalizer) =>
+          TryFinally(transform(block, isStat), transformStat(finalizer))
 
         case Throw(expr) =>
           Throw(transformExpr(expr))
@@ -145,6 +148,20 @@ object Transformers {
           JSBracketMethodApply(transformExpr(receiver), transformExpr(method),
               args map transformExpr)
 
+        case JSSuperBracketSelect(cls, qualifier, item) =>
+          JSSuperBracketSelect(cls, transformExpr(qualifier),
+              transformExpr(item))
+
+        case JSSuperBracketCall(cls, receiver, method, args) =>
+          JSSuperBracketCall(cls, transformExpr(receiver),
+              transformExpr(method), args map transformExpr)
+
+        case JSSuperConstructorCall(args) =>
+          JSSuperConstructorCall(args map transformExpr)
+
+        case JSSpread(items) =>
+          JSSpread(transformExpr(items))
+
         case JSDelete(prop) =>
           JSDelete(transformExpr(prop))
 
@@ -159,7 +176,14 @@ object Transformers {
 
         case JSObjectConstr(fields) =>
           JSObjectConstr(fields map {
-            case (name, value) => (name, transformExpr(value))
+            case (name, value) =>
+              val newName = name match {
+                case ComputedName(tree, logicalName) =>
+                  ComputedName(transformExpr(tree), logicalName)
+                case _ =>
+                  name
+              }
+              (newName, transformExpr(value))
           })
 
         // Atomic expressions
@@ -170,8 +194,9 @@ object Transformers {
 
         // Trees that need not be transformed
 
-        case _:Skip | _:Continue | _:Debugger | _:LoadModule | _:JSEnvInfo |
-            _:Literal | _:VarRef | _:This | EmptyTree =>
+        case _:Skip | _:Continue | _:Debugger | _:LoadModule | _:SelectStatic |
+            _:LoadJSConstructor | _:LoadJSModule  | _:JSLinkingInfo |
+            _:Literal | _:UndefinedParam | _:VarRef | _:This  =>
           tree
 
         case _ =>
@@ -191,26 +216,33 @@ object Transformers {
       implicit val pos = tree.pos
 
       tree match {
-        case FieldDef(_, _, _) =>
+        case FieldDef(_, _, _, _) =>
           tree
 
         case tree: MethodDef =>
           val MethodDef(static, name, args, resultType, body) = tree
-          MethodDef(static, name, args, resultType, transformStat(body))(
+          MethodDef(static, name, args, resultType, body.map(transformStat))(
               tree.optimizerHints, None)
 
-        case PropertyDef(name, getterBody, setterArg, setterBody) =>
+        case PropertyDef(static, name, getterBody, setterArgAndBody) =>
           PropertyDef(
+              static,
               name,
-              transformStat(getterBody),
-              setterArg,
-              transformStat(setterBody))
+              getterBody.map(transformStat),
+              setterArgAndBody map { case (arg, body) =>
+                (arg, transformStat(body))
+              })
 
         case ConstructorExportDef(fullName, args, body) =>
           ConstructorExportDef(fullName, args, transformStat(body))
 
-        case ModuleExportDef(_) =>
+        case _:JSClassExportDef | _:ModuleExportDef |
+            _:TopLevelModuleExportDef | _:TopLevelFieldExportDef =>
           tree
+
+        case TopLevelMethodExportDef(methodDef) =>
+          TopLevelMethodExportDef(
+              transformDef(methodDef).asInstanceOf[MethodDef])
 
         case _ =>
           sys.error(s"Invalid tree in transformDef() of class ${tree.getClass}")

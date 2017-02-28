@@ -14,16 +14,12 @@ import org.scalajs.core.ir.ScalaJSVersions
 import org.scalajs.core.tools.sem._
 import org.scalajs.core.tools.io._
 import org.scalajs.core.tools.logging._
-import org.scalajs.core.tools.classpath._
-import org.scalajs.core.tools.classpath.builder._
 
 import CheckedBehavior.Compliant
 
-import org.scalajs.core.tools.optimizer.{
-  ScalaJSOptimizer,
-  ScalaJSClosureOptimizer,
-  ParIncOptimizer
-}
+import org.scalajs.core.tools.linker.Linker
+import org.scalajs.core.tools.linker.frontend.LinkerFrontend
+import org.scalajs.core.tools.linker.backend.{LinkerBackend, OutputMode, ModuleKind}
 
 import scala.collection.immutable.Seq
 
@@ -32,11 +28,13 @@ import java.net.URI
 
 object Scalajsld {
 
-  case class Options(
+  private case class Options(
     cp: Seq[File] = Seq.empty,
     output: File = null,
-    jsoutput: Option[File] = None,
+    jsoutput: Boolean = false,
     semantics: Semantics = Semantics.Defaults,
+    outputMode: OutputMode = OutputMode.ECMAScript51Isolated,
+    moduleKind: ModuleKind = ModuleKind.NoModule,
     noOpt: Boolean = false,
     fullOpt: Boolean = false,
     prettyPrint: Boolean = false,
@@ -46,6 +44,22 @@ object Scalajsld {
     checkIR: Boolean = false,
     stdLib: Option[File] = None,
     logLevel: Level = Level.Info)
+
+  private implicit object OutputModeRead extends scopt.Read[OutputMode] {
+    val arity = 1
+    val reads = { (s: String) =>
+      OutputMode.All.find(_.toString() == s).getOrElse(
+          throw new IllegalArgumentException(s"$s is not a valid output mode"))
+    }
+  }
+
+  private implicit object ModuleKindRead extends scopt.Read[ModuleKind] {
+    val arity = 1
+    val reads = { (s: String) =>
+      ModuleKind.All.find(_.toString() == s).getOrElse(
+          throw new IllegalArgumentException(s"$s is not a valid module kind"))
+    }
+  }
 
   def main(args: Array[String]): Unit = {
     val parser = new scopt.OptionParser[Options]("scalajsld") {
@@ -60,10 +74,11 @@ object Scalajsld {
         .action { (x, c) => c.copy(output = x) }
         .text("Output file of linker (required)")
       opt[File]("jsoutput")
+        .hidden()
         .valueName("<file>")
         .abbr("jo")
-        .action { (x, c) => c.copy(jsoutput = Some(x)) }
-        .text("Concatenate all JavaScript libary dependencies to this file")
+        .action { (_, c) => c.copy(jsoutput = true) }
+        .text("Deprecated: Does nothing but printing a warning")
       opt[Unit]('f', "fastOpt")
         .action { (_, c) => c.copy(noOpt = false, fullOpt = false) }
         .text("Optimize code (this is the default)")
@@ -84,9 +99,15 @@ object Scalajsld {
           c.semantics.withAsInstanceOfs(Compliant))
         }
         .text("Use compliant asInstanceOfs")
+      opt[OutputMode]('m', "outputMode")
+        .action { (mode, c) => c.copy(outputMode = mode) }
+        .text("Output mode " + OutputMode.All.mkString("(", ", ", ")"))
+      opt[ModuleKind]('k', "moduleKind")
+        .action { (kind, c) => c.copy(moduleKind = kind) }
+        .text("Module kind " + ModuleKind.All.mkString("(", ", ", ")"))
       opt[Unit]('b', "bypassLinkingErrors")
         .action { (_, c) => c.copy(bypassLinkingErrors = true) }
-        .text("Only warn if there are linking errors")
+        .text("Only warn if there are linking errors (deprecated)")
       opt[Unit]('c', "checkIR")
         .action { (_, c) => c.copy(checkIR = true) }
         .text("Check IR before optimizing")
@@ -96,7 +117,7 @@ object Scalajsld {
         .text("Relativize source map with respect to given path (meaningful with -s)")
       opt[Unit]("noStdlib")
         .action { (_, c) => c.copy(stdLib = None) }
-        .text("Don't automatcially include Scala.js standard library")
+        .text("Don't automatically include Scala.js standard library")
       opt[File]("stdlib")
         .valueName("<scala.js stdlib jar>")
         .hidden()
@@ -125,60 +146,53 @@ object Scalajsld {
     }
 
     for (options <- parser.parse(args, Options())) {
-      val cpFiles = options.stdLib.toList ++ options.cp
-      // Load and resolve classpath
-      val cp = PartialClasspathBuilder.build(cpFiles).resolve()
+      val classpath = options.stdLib.toList ++ options.cp
+      val irContainers = IRFileCache.IRContainer.fromClasspath(classpath)
 
-      // Write JS dependencies if requested
-      for (jsout <- options.jsoutput)
-        IO.concatFiles(WritableFileVirtualJSFile(jsout), cp.jsLibs.map(_.lib))
+      // Warn if writing JS dependencies was requested.
+      if (options.jsoutput) {
+        Console.err.println(
+            "Support for the --jsoutput flag has been dropped. " +
+            "JS dependencies will not be written to disk. " +
+            "Comment on https://github.com/scala-js/scala-js/issues/2163 " +
+            "if you rely on this feature.")
+      }
 
-      // Link Scala.js code
+      // Warn if bypassing linking errors was requested.
+      if (options.bypassLinkingErrors) {
+        Console.err.println(
+            "Support for bypassing linking errors with -b or " +
+            "--bypassLinkingErrors will be dropped in the next major version.")
+      }
+
+      val semantics =
+        if (options.fullOpt) options.semantics.optimized
+        else options.semantics
+
+      val frontendConfig = LinkerFrontend.Config()
+        .withBypassLinkingErrorsInternal(options.bypassLinkingErrors)
+        .withCheckIR(options.checkIR)
+
+      val backendConfig = LinkerBackend.Config()
+        .withRelativizeSourceMapBase(options.relativizeSourceMap)
+        .withPrettyPrint(options.prettyPrint)
+
+      val config = Linker.Config()
+        .withSourceMap(options.sourceMap)
+        .withOptimizer(!options.noOpt)
+        .withParallel(true)
+        .withClosureCompiler(options.fullOpt)
+        .withFrontendConfig(frontendConfig)
+        .withBackendConfig(backendConfig)
+
+      val linker = Linker(semantics, options.outputMode, options.moduleKind,
+          config)
+
+      val logger = new ScalaConsoleLogger(options.logLevel)
       val outFile = WritableFileVirtualJSFile(options.output)
-      if (options.fullOpt)
-        fullOpt(cp, outFile, options)
-      else
-        fastOpt(cp, outFile, options)
+      val cache = (new IRFileCache).newCache
+
+      linker.link(cache.cached(irContainers), outFile, logger)
     }
   }
-
-  private def fullOpt(cp: IRClasspath,
-      output: WritableVirtualJSFile, options: Options) = {
-    import ScalaJSClosureOptimizer._
-
-    val semantics = options.semantics.optimized
-
-    new ScalaJSClosureOptimizer(semantics).optimizeCP(
-        newScalaJSOptimizer(semantics), cp,
-        Config(
-            output = output,
-            wantSourceMap = options.sourceMap,
-            relativizeSourceMapBase = options.relativizeSourceMap,
-            bypassLinkingErrors = options.bypassLinkingErrors,
-            checkIR = options.checkIR,
-            prettyPrint = options.prettyPrint),
-        newLogger(options))
-  }
-
-  private def fastOpt(cp: IRClasspath,
-      output: WritableVirtualJSFile, options: Options) = {
-    import ScalaJSOptimizer._
-
-    newScalaJSOptimizer(options.semantics).optimizeCP(cp,
-        Config(
-            output = output,
-            wantSourceMap = options.sourceMap,
-            bypassLinkingErrors = options.bypassLinkingErrors,
-            checkIR = options.checkIR,
-            disableOptimizer = options.noOpt,
-            relativizeSourceMapBase = options.relativizeSourceMap),
-        newLogger(options))
-  }
-
-  private def newLogger(options: Options) =
-    new ScalaConsoleLogger(options.logLevel)
-
-  private def newScalaJSOptimizer(semantics: Semantics) =
-    new ScalaJSOptimizer(semantics, ParIncOptimizer.factory)
-
 }

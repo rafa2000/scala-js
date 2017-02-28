@@ -5,7 +5,7 @@ import scala.scalajs.js
 class Throwable(s: String, private var e: Throwable) extends Object with java.io.Serializable {
   def this() = this(null, null)
   def this(s: String) = this(s, null)
-  def this(e: Throwable) = this(null, e)
+  def this(e: Throwable) = this(if (e == null) null else e.toString, e)
 
   private[this] var stackTrace: Array[StackTraceElement] = _
 
@@ -111,7 +111,7 @@ class Throwable(s: String, private var e: Throwable) extends Object with java.io
     }
   }
 
-  override def toString() = {
+  override def toString(): String = {
     val className = getClass.getName
     val message = getMessage()
     if (message eq null) className
@@ -140,7 +140,7 @@ class AssertionError private (s: String) extends Error(s) {
 }
 
 class BootstrapMethodError(s: String, e: Throwable) extends LinkageError(s) {
-  def this(e: Throwable) = this(null, e)
+  def this(e: Throwable) = this(if (e == null) null else e.toString, e)
   def this(s: String) = this(s, null)
   def this() = this(null, null)
 }
@@ -156,7 +156,7 @@ class ClassFormatError(s: String) extends LinkageError(s) {
 class Error(s: String, e: Throwable) extends Throwable(s, e) {
   def this() = this(null, null)
   def this(s: String) = this(s, null)
-  def this(e: Throwable) = this(null, e)
+  def this(e: Throwable) = this(if (e == null) null else e.toString, e)
 }
 
 class ExceptionInInitializerError private (s: String, private val e: Throwable) extends LinkageError(s) {
@@ -258,16 +258,14 @@ class CloneNotSupportedException(s: String) extends Exception(s) {
   def this() = this(null)
 }
 
-import scala.language.existentials
-class EnumConstantNotPresentException(
-    e: Class[_ <: Enum[T] forSome { type T <: Enum[T] }], c: String)
+class EnumConstantNotPresentException(e: Class[_ <: Enum[_]], c: String)
     extends RuntimeException(e.getName() + "." + c) {
-  def enumType() = e
-  def constantName() = c
+  def enumType(): Class[_ <: Enum[_]] = e
+  def constantName(): String = c
 }
 
 class Exception(s: String, e: Throwable) extends Throwable(s, e) {
-  def this(e: Throwable) = this(null, e)
+  def this(e: Throwable) = this(if (e == null) null else e.toString, e)
   def this(s: String) = this(s, null)
   def this() = this(null, null)
 }
@@ -277,7 +275,7 @@ class IllegalAccessException(s: String) extends ReflectiveOperationException(s) 
 }
 
 class IllegalArgumentException(s: String, e: Throwable) extends RuntimeException(s, e) {
-  def this(e: Throwable) = this(null, e)
+  def this(e: Throwable) = this(if (e == null) null else e.toString, e)
   def this(s: String) = this(s, null)
   def this() = this(null, null)
 }
@@ -287,7 +285,7 @@ class IllegalMonitorStateException(s: String) extends RuntimeException(s) {
 }
 
 class IllegalStateException(s: String, e: Throwable) extends RuntimeException(s, e) {
-  def this(e: Throwable) = this(null, e)
+  def this(e: Throwable) = this(if (e == null) null else e.toString, e)
   def this(s: String) = this(s, null)
   def this() = this(null, null)
 }
@@ -329,19 +327,25 @@ class NumberFormatException(s: String) extends IllegalArgumentException(s) {
 }
 
 class ReflectiveOperationException(s: String, e: Throwable) extends Exception(s, e) {
-  def this(e: Throwable) = this(null, e)
+  def this(e: Throwable) = this(if (e == null) null else e.toString, e)
+  def this(s: String) = this(s, null)
+  def this() = this(null, null)
+}
+
+class RejectedExecutionException(s: String, e: Throwable) extends RuntimeException(s, e) {
+  def this(e: Throwable) = this(if (e == null) null else e.toString, e)
   def this(s: String) = this(s, null)
   def this() = this(null, null)
 }
 
 class RuntimeException(s: String, e: Throwable) extends Exception(s, e) {
-  def this(e: Throwable) = this(null, e)
+  def this(e: Throwable) = this(if (e == null) null else e.toString, e)
   def this(s: String) = this(s, null)
   def this() = this(null, null)
 }
 
 class SecurityException(s: String, e: Throwable) extends RuntimeException(s, e) {
-  def this(e: Throwable) = this(null, e)
+  def this(e: Throwable) = this(if (e == null) null else e.toString, e)
   def this(s: String) = this(s, null)
   def this() = this(null, null)
 }
@@ -359,5 +363,5 @@ class TypeNotPresentException(t: String, e: Throwable)
 class UnsupportedOperationException(s: String, e: Throwable) extends RuntimeException(s, e) {
   def this() = this(null, null)
   def this(s: String) = this(s, null)
-  def this(e: Throwable) = this(null, e)
+  def this(e: Throwable) = this(if (e == null) null else e.toString, e)
 }

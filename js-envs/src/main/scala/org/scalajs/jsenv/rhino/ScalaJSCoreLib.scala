@@ -16,33 +16,46 @@ import org.mozilla.javascript.{Context, Scriptable}
 import org.scalajs.core.ir
 
 import org.scalajs.core.tools.sem.Semantics
-import org.scalajs.core.tools.optimizer.LinkedClass
-import org.scalajs.core.tools.javascript.{Printers, ScalaJSClassEmitter}
+import org.scalajs.core.tools.linker.{LinkedClass, LinkingUnit}
+import org.scalajs.core.tools.javascript._
 import org.scalajs.core.tools.io._
-import org.scalajs.core.tools.classpath._
-import org.scalajs.core.tools.corelib._
 
-class ScalaJSCoreLib(semantics: Semantics, classpath: IRClasspath) {
+import org.scalajs.core.tools.linker.backend.ModuleKind.NoModule
+import org.scalajs.core.tools.linker.backend.OutputMode.ECMAScript51Global
+import org.scalajs.core.tools.linker.backend.emitter._
+
+private[rhino] class ScalaJSCoreLib(linkingUnit: LinkingUnit) {
   import ScalaJSCoreLib._
 
+  require(linkingUnit.esLevel == ESLevel.ES5, "RhinoJSEnv only supports ES5")
+
+  private val emitter =
+    new Emitter(linkingUnit.semantics, ECMAScript51Global, NoModule)
+
+  emitter.rhinoAPI.initialize(linkingUnit)
+
   private val (providers, exportedSymbols) = {
-    val providers = mutable.Map.empty[String, VirtualScalaJSIRFile]
+    val providers = mutable.Map.empty[String, LinkedClass]
     val exportedSymbols = mutable.ListBuffer.empty[String]
 
-    for (irFile <- classpath.scalaJSIR) {
-      val info = irFile.info
-      providers += info.encodedName -> irFile
-      if (info.isExported)
-        exportedSymbols += info.encodedName
+    for (linkedClass <- linkingUnit.classDefs) {
+      def hasStaticInitializer = {
+        linkedClass.staticMethods.exists {
+          _.tree.name.encodedName == ir.Definitions.StaticInitializerName
+        }
+      }
+
+      providers += linkedClass.encodedName -> linkedClass
+      if (linkedClass.isExported || hasStaticInitializer)
+        exportedSymbols += linkedClass.encodedName
     }
 
     (providers, exportedSymbols)
   }
 
-  private val ancestorStore = mutable.Map.empty[String, List[String]]
-
-  def insertInto(context: Context, scope: Scriptable) = {
-    CoreJSLibs.libs(semantics).foreach(context.evaluateFile(scope, _))
+  def insertInto(context: Context, scope: Scriptable): Unit = {
+    val semantics = linkingUnit.semantics
+    context.evaluateFile(scope, emitter.rhinoAPI.getHeaderFile())
     lazifyScalaJSFields(scope)
 
     // Make sure exported symbols are loaded
@@ -102,14 +115,9 @@ class ScalaJSCoreLib(semantics: Semantics, classpath: IRClasspath) {
   }
 
   private def getSourceMapper(fileName: String, untilLine: Int) = {
-    val irFile = providers(fileName.stripSuffix(PseudoFileSuffix))
+    val linked = providers(fileName.stripSuffix(PseudoFileSuffix))
     val mapper = new Printers.ReverseSourceMapPrinter(untilLine)
-    val (info, classDef) = irFile.infoAndTree
-    val className = classDef.name.name
-    val ancestors = ancestorStore.getOrElse(className,
-        throw new AssertionError(s"$className should be loaded"))
-    val linked = LinkedClass(info, classDef, ancestors)
-    val desugared = new ScalaJSClassEmitter(semantics).genClassDef(linked)
+    val desugared = emitter.rhinoAPI.genClassDef(linked)
     mapper.reverseSourceMap(desugared)
     mapper
   }
@@ -131,9 +139,13 @@ class ScalaJSCoreLib(semantics: Semantics, classpath: IRClasspath) {
 
   private val scalaJSLazyFields = Seq(
       Info("d"),
+      Info("a"),
+      Info("b"),
       Info("c"),
       Info("h"),
       Info("s", isStatics = true),
+      Info("t", isStatics = true),
+      Info("f", isStatics = true),
       Info("n"),
       Info("m"),
       Info("is"),
@@ -148,58 +160,36 @@ class ScalaJSCoreLib(semantics: Semantics, classpath: IRClasspath) {
       new LazyScalaJSScope(this, scope, base, isStatics)
 
     for (Info(name, isStatics) <- scalaJSLazyFields) {
-      val base = ScalaJS.get(name, ScalaJS).asInstanceOf[Scriptable]
-      val lazified = makeLazyScalaJSScope(base, isStatics)
-      ScalaJS.put(name, ScalaJS, lazified)
+      val base = ScalaJS.get(name, ScalaJS)
+      // Depending on the Semantics, some fields could be entirely absent
+      if (base != Scriptable.NOT_FOUND) {
+        val lazified = makeLazyScalaJSScope(
+            base.asInstanceOf[Scriptable], isStatics)
+        ScalaJS.put(name, ScalaJS, lazified)
+      }
     }
   }
 
-  private[rhino] def load(scope: Scriptable, encodedName: String): Unit =
-    loadAncestors(scope, encodedName)
+  private[rhino] def load(scope: Scriptable, encodedName: String): Unit = {
+    val linkedClass = providers.getOrElse(encodedName,
+        throw new RhinoJSEnv.ClassNotFoundException(encodedName))
 
-  private def loadAncestors(scope: Scriptable,
-      encodedName: String): List[String] = {
-    ancestorStore.getOrElseUpdate(encodedName, {
-      val irFile = providers.getOrElse(encodedName,
-        throw new ClassNotFoundException(encodedName))
+    val desugared = emitter.rhinoAPI.genClassDef(linkedClass)
 
-      // Desugar tree
-      val (info, classDef) = irFile.infoAndTree
-      val className = classDef.name.name
-
-      val strictAncestors = for {
-        parent   <- classDef.superClass ++: classDef.interfaces
-        ancestor <- loadAncestors(scope, parent.name)
-      } yield ancestor
-
-      val ancestors = className :: strictAncestors.distinct
-      val linked = LinkedClass(info, classDef, ancestors)
-
-      val desugared = new ScalaJSClassEmitter(semantics).genClassDef(linked)
-
-      // Write tree
-      val codeWriter = new java.io.StringWriter
-      val printer = new Printers.JSTreePrinter(codeWriter)
-      printer.printTopLevelTree(desugared)
-      printer.complete()
-      val ctx = Context.getCurrentContext()
-      val fakeFileName = encodedName + PseudoFileSuffix
-      ctx.evaluateString(scope, codeWriter.toString(),
-          fakeFileName, 1, null)
-
-      ancestors
-    })
+    // Write tree
+    val codeWriter = new java.io.StringWriter
+    val printer = new Printers.JSTreePrinter(codeWriter)
+    printer.printTopLevelTree(desugared)
+    printer.complete()
+    val ctx = Context.getCurrentContext()
+    val fakeFileName = encodedName + PseudoFileSuffix
+    ctx.evaluateString(scope, codeWriter.toString(),
+        fakeFileName, 1, null)
   }
 }
 
-object ScalaJSCoreLib {
+private[rhino] object ScalaJSCoreLib {
   private case class Info(name: String, isStatics: Boolean = false)
 
-  private val EncodedNameLine = raw""""encodedName": *"([^"]+)"""".r.unanchored
-
   private final val PseudoFileSuffix = ".sjsir"
-
-  final class ClassNotFoundException(className: String) extends Exception(
-    s"Rhino was unable to load Scala.js class: $className")
-
 }

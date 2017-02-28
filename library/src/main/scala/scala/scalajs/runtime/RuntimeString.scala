@@ -1,5 +1,7 @@
 package scala.scalajs.runtime
 
+import java.util.Comparator
+
 import scala.scalajs.js
 import js.JSStringOps._
 
@@ -19,6 +21,7 @@ private[runtime] object RuntimeString {
   /** Operations on a primitive JS string that are shadowed by Scala methods,
    *  and that we need to implement these very Scala methods.
    */
+  @js.native
   private trait SpecialJSStringOps extends js.Any {
     def length: Int = js.native
     def charCodeAt(index: Int): Int = js.native
@@ -35,6 +38,12 @@ private[runtime] object RuntimeString {
   def charAt(thiz: String, index: Int): Char =
     specialJSStringOps(thiz).charCodeAt(index).toChar
 
+  final lazy val CASE_INSENSITIVE_ORDER: Comparator[String] = {
+    new Comparator[String] with Serializable {
+      def compare(o1: String, o2: String): Int = o1.compareToIgnoreCase(o2)
+    }
+  }
+
   def codePointAt(thiz: String, index: Int): Int = {
     val high = thiz.charAt(index)
     if (index+1 < thiz.length) {
@@ -46,6 +55,20 @@ private[runtime] object RuntimeString {
     } else {
       high.toInt
     }
+  }
+
+  def codePointCount(thiz: String, beginIndex: Int, endIndex: Int): Int = {
+    if (endIndex > thiz.length || beginIndex < 0 || endIndex < beginIndex)
+      throw new IndexOutOfBoundsException
+    var res = endIndex - beginIndex
+    var i = beginIndex
+    val end = endIndex - 1
+    while (i < end) {
+      if (Character.isSurrogatePair(thiz.charAt(i), thiz.charAt(i + 1)))
+        res -= 1
+      i += 1
+    }
+    res
   }
 
   def hashCode(thiz: String): Int = {
@@ -146,7 +169,8 @@ private[runtime] object RuntimeString {
     thiz.lastIndexOf(fromCodePoint(ch))
 
   def lastIndexOf(thiz: String, ch: Int, fromIndex: Int): Int =
-    thiz.lastIndexOf(fromCodePoint(ch), fromIndex)
+    if (fromIndex < 0) -1
+    else thiz.lastIndexOf(fromCodePoint(ch), fromIndex)
 
   @inline
   def lastIndexOf(thiz: String, str: String): Int =
@@ -154,7 +178,8 @@ private[runtime] object RuntimeString {
 
   @inline
   def lastIndexOf(thiz: String, str: String, fromIndex: Int): Int =
-    thiz.jsLastIndexOf(str, fromIndex)
+    if (fromIndex < 0) -1
+    else thiz.jsLastIndexOf(str, fromIndex)
 
   @inline
   def length(thiz: String): Int =
@@ -164,6 +189,31 @@ private[runtime] object RuntimeString {
   def matches(thiz: String, regex: String): Boolean = {
     checkNull(thiz)
     Pattern.matches(regex, thiz)
+  }
+
+  /* Both regionMatches ported from
+   * https://github.com/gwtproject/gwt/blob/master/user/super/com/google/gwt/emul/java/lang/String.java
+   */
+  def regionMatches(thiz: String, ignoreCase: Boolean,
+      toffset: Int, other: String, ooffset: Int, len: Int): Boolean = {
+    checkNull(thiz)
+    if (other == null) {
+      throw new NullPointerException()
+    } else if (toffset < 0 || ooffset < 0 || toffset + len > thiz.length || ooffset + len > other.length) {
+      false
+    } else if (len <= 0) {
+      true
+    } else {
+      val left = thiz.substring(toffset, toffset + len)
+      val right = other.substring(ooffset, ooffset + len)
+      if (ignoreCase) left.equalsIgnoreCase(right) else left == right
+    }
+  }
+
+  @inline
+  def regionMatches(thiz: String, toffset: Int,
+      other: String, ooffset: Int, len: Int): Boolean = {
+    regionMatches(thiz, false, toffset, other, ooffset, len)
   }
 
   @inline
@@ -198,8 +248,10 @@ private[runtime] object RuntimeString {
     thiz.startsWith(prefix, 0)
 
   @inline
-  def startsWith(thiz: String, prefix: String, toffset: Int): Boolean =
-    thiz.jsSubstring(toffset, prefix.length) == prefix
+  def startsWith(thiz: String, prefix: String, toffset: Int): Boolean = {
+    (toffset <= thiz.length && toffset >= 0 &&
+        thiz.jsSubstring(toffset, toffset + prefix.length) == prefix)
+  }
 
   @inline
   def subSequence(thiz: String, beginIndex: Int, endIndex: Int): CharSequence =
@@ -248,13 +300,13 @@ private[runtime] object RuntimeString {
     if (offset < 0 || end < offset || end > value.length)
       throw new StringIndexOutOfBoundsException
 
-    val charCodes = new js.Array[Int]
+    var result = ""
     var i = offset
     while (i != end) {
-      charCodes += value(i).toInt
+      result += value(i).toString
       i += 1
     }
-    fromCharCode(charCodes: _*)
+    result
   }
 
   def newString(bytes: Array[Byte]): String =
@@ -282,22 +334,13 @@ private[runtime] object RuntimeString {
     if (offset < 0 || end < offset || end > codePoints.length)
       throw new StringIndexOutOfBoundsException
 
-    val charCodes = new js.Array[Int]
+    var result = ""
     var i = offset
     while (i != end) {
-      val cp = codePoints(i)
-      if (cp < 0 || cp > Character.MAX_CODE_POINT)
-        throw new IllegalArgumentException
-      if (cp <= Character.MAX_VALUE) {
-        charCodes += cp
-      } else {
-        val offsetCp = cp - 0x10000
-        charCodes += (offsetCp >> 10) | 0xd800
-        charCodes += (offsetCp & 0x3ff) | 0xdc00
-      }
+      result += fromCodePoint(codePoints(i))
       i += 1
     }
-    fromCharCode(charCodes: _*)
+    result
   }
 
   def newString(original: String): String =
@@ -344,20 +387,21 @@ private[runtime] object RuntimeString {
     else s
 
   private def fromCodePoint(codePoint: Int): String = {
-    if ((codePoint & ~Character.MAX_VALUE) == 0)
-      fromCharCode(codePoint)
-    else if (codePoint < 0 || codePoint > Character.MAX_CODE_POINT)
+    if ((codePoint & ~Character.MAX_VALUE) == 0) {
+      NativeJSString.fromCharCode(codePoint)
+    } else if (codePoint < 0 || codePoint > Character.MAX_CODE_POINT) {
       throw new IllegalArgumentException
-    else {
+    } else {
       val offsetCp = codePoint - 0x10000
-      fromCharCode(
+      NativeJSString.fromCharCode(
           (offsetCp >> 10) | 0xd800, (offsetCp & 0x3ff) | 0xdc00)
     }
   }
 
-  @inline private def fromCharCode(charCodes: Int*): String = {
-    js.Dynamic.global.String.applyDynamic("fromCharCode")(
-        charCodes.asInstanceOf[Seq[js.Any]]: _*).asInstanceOf[String]
+  @js.native
+  @js.annotation.JSName("String")
+  private object NativeJSString extends js.Object {
+    def fromCharCode(charCodes: Int*): String = js.native
   }
 
 }

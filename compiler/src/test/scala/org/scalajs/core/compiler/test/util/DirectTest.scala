@@ -8,6 +8,8 @@ import org.scalajs.core.compiler.ScalaJSPlugin
 
 import scala.collection.mutable
 
+import java.io.File
+
 /** This is heavily inspired by scala's partest suite's DirectTest */
 abstract class DirectTest {
 
@@ -15,7 +17,7 @@ abstract class DirectTest {
   def extraArgs: List[String] = Nil
 
   /** create settings objects for test from arg string */
-  def newSettings(args: List[String]) = {
+  def newSettings(args: List[String]): Settings = {
     val s = new Settings
     s processArguments (args, true)
     s
@@ -26,7 +28,7 @@ abstract class DirectTest {
         List(
             "-d", testOutputPath,
             "-bootclasspath", scalaLibPath,
-            "-classpath", scalaJSLibPath) ++
+            "-classpath", classpath.mkString(File.pathSeparator)) ++
         extraArgs ++ args.toList)
 
     lazy val global: Global = new Global(settings, newReporter(settings)) {
@@ -39,9 +41,9 @@ abstract class DirectTest {
   def newScalaJSPlugin(global: Global): ScalaJSPlugin =
     new ScalaJSPlugin(global)
 
-  def newReporter(settings: Settings) = new ConsoleReporter(settings)
+  def newReporter(settings: Settings): Reporter = new ConsoleReporter(settings)
 
-  def newSources(codes: String*) = codes.toList.zipWithIndex map {
+  private def newSources(codes: String*) = codes.toList.zipWithIndex map {
     case (src, idx) => new BatchSourceFile(s"newSource${idx + 1}.scala", src)
   }
 
@@ -61,10 +63,23 @@ abstract class DirectTest {
   def compileString(sourceCode: String): Boolean =
     compileString(defaultGlobal)(sourceCode)
 
-  lazy val defaultGlobal = newScalaJSCompiler()
+  // Cannot reuse global, otherwise compiler crashes with Scala >= 2.11.5
+  // on following tests:
+  // - org.scalajs.core.compiler.test.JSExportTest
+  // - org.scalajs.core.compiler.test.JSDynamicLiteralTest
+  // Filed as #1443
+  def defaultGlobal: Global = newScalaJSCompiler()
 
-  def testOutputPath = sys.props("scala.scalajs.compiler.test.output")
-  def scalaJSLibPath = sys.props("scala.scalajs.compiler.test.scalajslib")
-  def scalaLibPath   = sys.props("scala.scalajs.compiler.test.scalalib")
+  def testOutputPath: String = {
+    val baseDir = sys.props("scala.scalajs.compiler.test.output")
+    val outDir = new File(baseDir, getClass.getName)
+    outDir.mkdirs()
+    outDir.getAbsolutePath
+  }
 
+  def scalaJSLibPath: String = sys.props("scala.scalajs.compiler.test.scalajslib")
+  def scalaLibPath: String   = sys.props("scala.scalajs.compiler.test.scalalib")
+  def scalaReflectPath: String = sys.props("scala.scalajs.compiler.test.scalareflect")
+
+  def classpath: List[String] = List(scalaJSLibPath)
 }

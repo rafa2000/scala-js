@@ -21,7 +21,7 @@ object Hashers {
       hasher.mixPropertyName(name)
       hasher.mixTrees(args)
       hasher.mixType(resultType)
-      hasher.mixTree(body)
+      body.foreach(hasher.mixTree)
       hasher.mixInt(methodDef.optimizerHints.bits)
 
       val hash = hasher.finalizeHash()
@@ -53,9 +53,12 @@ object Hashers {
     val size = 2 * (if (considerPos) 2 else 1) * 20
     val builder = new StringBuilder(size)
 
-    def append(hash: Array[Byte]) =
-      for (b <- hash) builder.append(f"$b%02X")
+    def hexDigit(digit: Int): Char = Character.forDigit(digit, 16)
 
+    def append(hash: Array[Byte]): Unit = {
+      for (b <- hash)
+        builder.append(hexDigit(b >> 4)).append(hexDigit(b & 0xF))
+    }
     append(hash.treeHash)
 
     if (considerPos)
@@ -86,9 +89,6 @@ object Hashers {
     def mixTree(tree: Tree): Unit = {
       mixPos(tree.pos)
       tree match {
-        case EmptyTree =>
-          mixTag(TagEmptyTree)
-
         case VarDef(ident, vtpe, mutable, rhs) =>
           mixTag(TagVarDef)
           mixIdent(ident)
@@ -96,11 +96,18 @@ object Hashers {
           mixBoolean(mutable)
           mixTree(rhs)
 
-        case ParamDef(ident, ptpe, mutable) =>
+        case ParamDef(ident, ptpe, mutable, rest) =>
           mixTag(TagParamDef)
           mixIdent(ident)
           mixType(ptpe)
           mixBoolean(mutable)
+          /* TODO Remove this test in the next major release.
+           * In 0.6.x we need this test so that the hash of a non-rest ParamDef
+           * emitted in 0.6.3 format is the same as an (implicitly non-rest)
+           * ParamDef emitted in 0.6.0 format.
+           */
+          if (rest)
+            mixBoolean(rest)
 
         case Skip() =>
           mixTag(TagSkip)
@@ -144,11 +151,16 @@ object Hashers {
           mixTree(cond)
           mixOptIdent(label)
 
-        case Try(block, errVar, handler, finalizer) =>
-          mixTag(TagTry)
+        case TryCatch(block, errVar, handler) =>
+          mixTag(TagTryCatch)
           mixTree(block)
           mixIdent(errVar)
           mixTree(handler)
+          mixType(tree.tpe)
+
+        case TryFinally(block, finalizer) =>
+          mixTag(TagTryFinally)
+          mixTree(block)
           mixTree(finalizer)
           mixType(tree.tpe)
 
@@ -191,6 +203,12 @@ object Hashers {
         case Select(qualifier, item) =>
           mixTag(TagSelect)
           mixTree(qualifier)
+          mixIdent(item)
+          mixType(tree.tpe)
+
+        case SelectStatic(cls, item) =>
+          mixTag(TagSelectStatic)
+          mixType(cls)
           mixIdent(item)
           mixType(tree.tpe)
 
@@ -255,12 +273,12 @@ object Hashers {
         case IsInstanceOf(expr, cls) =>
           mixTag(TagIsInstanceOf)
           mixTree(expr)
-          mixType(cls)
+          mixRefType(cls)
 
         case AsInstanceOf(expr, cls) =>
           mixTag(TagAsInstanceOf)
           mixTree(expr)
-          mixType(cls)
+          mixRefType(cls)
 
         case Unbox(expr, charCode) =>
           mixTag(TagUnbox)
@@ -309,6 +327,35 @@ object Hashers {
           mixTree(method)
           mixTrees(args)
 
+        case JSSuperBracketSelect(cls, qualifier, item) =>
+          mixTag(TagJSSuperBracketSelect)
+          mixType(cls)
+          mixTree(qualifier)
+          mixTree(item)
+
+        case JSSuperBracketCall(cls, receiver, method, args) =>
+          mixTag(TagJSSuperBracketCall)
+          mixType(cls)
+          mixTree(receiver)
+          mixTree(method)
+          mixTrees(args)
+
+        case JSSuperConstructorCall(args) =>
+          mixTag(TagJSSuperConstructorCall)
+          mixTrees(args)
+
+        case LoadJSConstructor(cls) =>
+          mixTag(TagLoadJSConstructor)
+          mixType(cls)
+
+        case LoadJSModule(cls) =>
+          mixTag(TagLoadJSModule)
+          mixType(cls)
+
+        case JSSpread(items) =>
+          mixTag(TagJSSpread)
+          mixTree(items)
+
         case JSDelete(prop) =>
           mixTag(TagJSDelete)
           mixTree(prop)
@@ -335,8 +382,8 @@ object Hashers {
             mixTree(value)
           }
 
-        case JSEnvInfo() =>
-          mixTag(TagJSEnvInfo)
+        case JSLinkingInfo() =>
+          mixTag(TagJSLinkingInfo)
 
         case Undefined() =>
           mixTag(TagUndefined)
@@ -374,7 +421,7 @@ object Hashers {
 
         case ClassOf(cls) =>
           mixTag(TagClassOf)
-          mixType(cls)
+          mixRefType(cls)
 
         case VarRef(ident) =>
           mixTag(TagVarRef)
@@ -400,6 +447,9 @@ object Hashers {
 
     def mixTrees(trees: List[Tree]): Unit =
       trees.foreach(mixTree)
+
+    def mixRefType(tpe: ReferenceType): Unit =
+      mixType(tpe.asInstanceOf[Type])
 
     def mixType(tpe: Type): Unit = tpe match {
       case AnyType     => mixTag(TagAnyType)
@@ -442,8 +492,18 @@ object Hashers {
     def mixOptIdent(optIdent: Option[Ident]): Unit = optIdent.foreach(mixIdent)
 
     def mixPropertyName(name: PropertyName): Unit = name match {
-      case name: Ident         => mixIdent(name)
-      case name: StringLiteral => mixTree(name)
+      case name: Ident =>
+        mixTag(TagPropertyNameIdent)
+        mixIdent(name)
+
+      case name: StringLiteral =>
+        mixTag(TagPropertyNameStringLiteral)
+        mixTree(name)
+
+      case ComputedName(tree, logicalName) =>
+        mixTag(TagPropertyNameComputedName)
+        mixTree(tree)
+        mixString(logicalName)
     }
 
     def mixPos(pos: Position): Unit = {

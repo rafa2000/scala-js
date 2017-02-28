@@ -64,6 +64,14 @@ abstract class JSASTTest extends DirectTest {
       this
     }
 
+    def hasExactly(count: Int, trgName: String)(pf: Pat): this.type = {
+      var actualCount = 0
+      val tr = new PFTraverser(pf.andThen(_ => actualCount += 1))
+      tr.traverse()
+      assertEquals(s"AST has the wrong number of $trgName", count, actualCount)
+      this
+    }
+
     def traverse(pf: Pat): this.type = {
       val tr = new PFTraverser(pf)
       tr.traverse()
@@ -79,21 +87,25 @@ abstract class JSASTTest extends DirectTest {
 
   implicit def string2ast(str: String): JSAST = stringAST(str)
 
-  override def newScalaJSPlugin(global: Global) = new ScalaJSPlugin(global) {
-    override def generatedJSAST(cld: List[js.Tree]): Unit = {
-      lastAST = new JSAST(cld)
+  override def newScalaJSPlugin(global: Global): ScalaJSPlugin = {
+    new ScalaJSPlugin(global) {
+      override def generatedJSAST(cld: List[js.Tree]): Unit = {
+        lastAST = new JSAST(cld)
+      }
     }
   }
 
   def stringAST(code: String): JSAST = stringAST(defaultGlobal)(code)
   def stringAST(global: Global)(code: String): JSAST = {
-    compileString(global)(code)
+    if (!compileString(global)(code))
+      throw new IllegalArgumentException("snippet did not compile")
     lastAST
   }
 
   def sourceAST(source: SourceFile): JSAST = sourceAST(defaultGlobal)(source)
   def sourceAST(global: Global)(source: SourceFile): JSAST = {
-    compileSources(global)(source)
+    if (!compileSources(global)(source))
+      throw new IllegalArgumentException("snippet did not compile")
     lastAST
   }
 

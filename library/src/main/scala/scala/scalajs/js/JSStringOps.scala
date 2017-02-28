@@ -20,9 +20,10 @@ import scala.scalajs.js.annotation._
 
 /** Operations on JavaScript strings.
  *
- *  The methods with an equivalent signature in [[String]] but with a different
- *  meaning are prefixed by `js` in this trait.
+ *  The methods with an equivalent signature in [[java.lang.String String]] but
+ *  with a different meaning are prefixed by `js` in this trait.
  */
+@native
 trait JSStringOps extends Any {
 
   /**
@@ -197,6 +198,12 @@ trait JSStringOps extends Any {
    * MDN
    */
   def toLocaleUpperCase(): String = native
+
+  /** <span class="badge badge-ecma6" style="float: right;">ECMAScript 6</span>
+   *  Returns the Unicode Normalization Form of this string.
+   */
+  def normalize(
+      form: UnicodeNormalizationForm = UnicodeNormalizationForm.NFC): String = native
 }
 
 object JSStringOps {

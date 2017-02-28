@@ -44,8 +44,8 @@ trait JSEncoding extends SubComponent { self: GenJSCode =>
 
   private val usedLocalNames = new ScopedVar[mutable.Set[String]]
   private val localSymbolNames = new ScopedVar[mutable.Map[Symbol, String]]
-  private val isKeywordOrReserved =
-    js.isKeyword ++ Seq("arguments", "eval", ScalaJSEnvironmentName)
+  private val isReserved =
+    Set("arguments", "eval", ScalaJSEnvironmentName)
 
   def withNewLocalNameScope[A](body: => A): A =
     withScopedVars(
@@ -56,12 +56,12 @@ trait JSEncoding extends SubComponent { self: GenJSCode =>
   private def freshName(base: String = "x"): String = {
     var suffix = 1
     var longName = base
-    while (usedLocalNames(longName) || isKeywordOrReserved(longName)) {
+    while (usedLocalNames(longName) || isReserved(longName)) {
       suffix += 1
       longName = base+"$"+suffix
     }
     usedLocalNames += longName
-    longName
+    mangleJSName(longName)
   }
 
   def freshLocalIdent()(implicit pos: ir.Position): js.Ident =
@@ -80,10 +80,10 @@ trait JSEncoding extends SubComponent { self: GenJSCode =>
     js.Ident(localSymbolName(sym), Some(sym.unexpandedName.decoded))
   }
 
-  private lazy val allRefClasses: Set[Symbol] = {
-    import definitions._
-    (Set(ObjectRefClass, VolatileObjectRefClass) ++
-        refClass.values ++ volatileRefClass.values)
+  /** See comment in `encodeFieldSym()`. */
+  private lazy val shouldMangleOuterPointerName = {
+    val v = scala.util.Properties.versionNumberString
+    !(v.startsWith("2.10.") || v.startsWith("2.11.") || v == "2.12.0-RC1")
   }
 
   def encodeFieldSym(sym: Symbol)(implicit pos: Position): js.Ident = {
@@ -95,16 +95,42 @@ trait JSEncoding extends SubComponent { self: GenJSCode =>
       if (name0.charAt(name0.length()-1) != ' ') name0
       else name0.substring(0, name0.length()-1)
 
-    /* We have to special-case fields of Ref types (IntRef, ObjectRef, etc.)
-     * because they are emitted as private by our .scala source files, but
-     * they are considered public at use site since their symbols come from
-     * Java-emitted .class files.
+    /* Java-defined fields are always accessed as if they were private. This
+     * is necessary because they are defined as private by our .scala source
+     * files, but they are considered `!isPrivate` at use site, since their
+     * symbols come from Java-emitted .class files. Fortunately, we can
+     * easily detect those as `isJavaDefined`. This includes fields of Ref
+     * types (IntRef, ObjectRef, etc.) which were special-cased at use-site
+     * in Scala.js < 0.6.15.
+     * Caveat: because of this, changing the length of the superclass chain of
+     * a Java-defined class is a binary incompatible change.
+     *
+     * Starting with 2.12.0-RC2, we also special case outer fields. This
+     * essentially fixes #2382, which is caused by a class having various $outer
+     * pointers in its hierarchy that points to different outer instances.
+     * Without this fix, they all collapse to the same field in the IR. We
+     * cannot fix this for all Scala versions at the moment, because that would
+     * break backwards binary compatibility. We *do* fix it for 2.12.0-RC2
+     * onwards because that also fixes #2625, which surfaced in 2.12 and is
+     * therefore a regression. We can do this because the 2.12 ecosystem is
+     * not binary compatible anyway (because of Scala) so we can break it on
+     * our side at the same time.
+     *
+     * TODO We should probably consider emitting *all* fields with an ancestor
+     * count. We cannot do that in a binary compatible way, though. This is
+     * filed as #2629.
      */
-    val idSuffix =
-      if (sym.isPrivate || allRefClasses.contains(sym.owner))
-        sym.owner.ancestors.count(!_.isInterface).toString
+    val idSuffix: String = {
+      val usePerClassSuffix = {
+        sym.isPrivate ||
+        sym.isJavaDefined ||
+        (shouldMangleOuterPointerName && sym.isOuterField)
+      }
+      if (usePerClassSuffix)
+        sym.owner.ancestors.count(!_.isTraitOrInterface).toString
       else
         "f"
+    }
 
     val encodedName = name + "$" + idSuffix
     js.Ident(mangleJSName(encodedName), Some(sym.unexpandedName.decoded))
@@ -148,12 +174,15 @@ trait JSEncoding extends SubComponent { self: GenJSCode =>
 
     def name = encodeMemberNameInternal(sym)
 
+    def privateSuffix(owner: Symbol): String =
+      if (owner.isTraitOrInterface && !owner.isImplClass) encodeClassFullName(owner)
+      else owner.ancestors.count(!_.isTraitOrInterface).toString
+
     val encodedName = {
       if (sym.isClassConstructor)
         "init" + InnerSep
       else if (sym.isPrivate)
-        mangleJSName(name) + OuterSep + "p" +
-          sym.owner.ancestors.count(!_.isInterface).toString
+        mangleJSName(name) + OuterSep + "p" + privateSuffix(sym.owner)
       else
         mangleJSName(name)
     }
@@ -182,7 +211,7 @@ trait JSEncoding extends SubComponent { self: GenJSCode =>
     require(sym.isValueParameter ||
         (!sym.owner.isClass && sym.isTerm && !sym.isMethod && !sym.isModule),
         "encodeLocalSym called with non-local symbol: " + sym)
-    js.Ident(mangleJSName(localSymbolName(sym)), Some(sym.unexpandedName.decoded))
+    js.Ident(localSymbolName(sym), Some(sym.unexpandedName.decoded))
   }
 
   def foreignIsImplClass(sym: Symbol): Boolean =
@@ -210,6 +239,11 @@ trait JSEncoding extends SubComponent { self: GenJSCode =>
   def needsModuleClassSuffix(sym: Symbol): Boolean =
     sym.isModuleClass && !foreignIsImplClass(sym)
 
+  def encodeComputedNameIdentity(sym: Symbol): String = {
+    assert(sym.owner.isModuleClass)
+    encodeClassFullName(sym.owner) + "__" + encodeMemberNameInternal(sym)
+  }
+
   private def encodeMemberNameInternal(sym: Symbol): String =
     sym.name.toString.replace("_", "$und")
 
@@ -218,18 +252,22 @@ trait JSEncoding extends SubComponent { self: GenJSCode =>
   private def makeParamsString(sym: Symbol, reflProxy: Boolean,
       inRTClass: Boolean): String = {
     val tpe = sym.tpe
-    val paramTypeNames = tpe.params map (p => internalName(p.tpe))
+
+    val paramTypeNames0 = tpe.params map (p => internalName(p.tpe))
+
+    val hasExplicitThisParameter =
+      inRTClass || isScalaJSDefinedJSClass(sym.owner)
+    val paramTypeNames =
+      if (!hasExplicitThisParameter) paramTypeNames0
+      else internalName(sym.owner.toTypeConstructor) :: paramTypeNames0
+
     val paramAndResultTypeNames = {
       if (sym.isClassConstructor)
         paramTypeNames
       else if (reflProxy)
         paramTypeNames :+ ""
-      else {
-        val paramAndResultTypeNames0 =
-          paramTypeNames :+ internalName(tpe.resultType)
-        if (!inRTClass) paramAndResultTypeNames0
-        else internalName(sym.owner.toTypeConstructor) +: paramAndResultTypeNames0
-      }
+      else
+        paramTypeNames :+ internalName(tpe.resultType)
     }
     makeParamsString(paramAndResultTypeNames)
   }

@@ -9,6 +9,8 @@ import scala.tools.nsc._
 
 import scala.collection.mutable
 
+import org.scalajs.core.ir.Trees.JSNativeLoadSpec
+
 /** Additions to Global meaningful for the JavaScript backend
  *
  *  @author Sébastien Doeraene
@@ -22,167 +24,80 @@ trait JSGlobalAddons extends JSDefinitions
   import definitions._
 
   /** JavaScript primitives, used in jscode */
-  object jsPrimitives extends JSPrimitives {
+  object jsPrimitives extends JSPrimitives { // scalastyle:ignore
     val global: JSGlobalAddons.this.global.type = JSGlobalAddons.this.global
     val jsAddons: ThisJSGlobalAddons =
       JSGlobalAddons.this.asInstanceOf[ThisJSGlobalAddons]
   }
 
+  sealed abstract class ExportDestination
+
+  object ExportDestination {
+    /** Export in the "normal" way: as an instance member, or at the top-level
+     *  for naturally top-level things (classes and modules).
+     */
+    case object Normal extends ExportDestination
+
+    /** Export at the top-level. */
+    case object TopLevel extends ExportDestination
+
+    /** Export as a static member of the companion class. */
+    case object Static extends ExportDestination
+  }
+
   /** global javascript interop related helpers */
-  object jsInterop {
+  object jsInterop { // scalastyle:ignore
     import scala.reflect.NameTransformer
     import scala.reflect.internal.Flags
+
+    /** Symbols of constructors and modules that are to be exported */
+    private val exportedSymbols =
+      mutable.Map.empty[Symbol, List[ExportInfo]]
+
+    /** JS native load specs of the symbols in the current compilation run. */
+    private val jsNativeLoadSpecs =
+      mutable.Map.empty[Symbol, JSNativeLoadSpec]
 
     private val exportPrefix = "$js$exported$"
     private val methodExportPrefix = exportPrefix + "meth$"
     private val propExportPrefix = exportPrefix + "prop$"
 
-    case class ExportInfo(jsName: String, pos: Position, isNamed: Boolean)
-
-    /** retrieves the names a sym should be exported to from its annotations
-     *
-     *  Note that for accessor symbols, the annotations of the accessed symbol
-     *  are used, rather than the annotations of the accessor itself.
-     */
-    def exportsOf(sym: Symbol): List[ExportInfo] = {
-      val exports = directExportsOf(sym) ++ inheritedExportsOf(sym)
-
-      // Calculate the distinct exports for this symbol (eliminate double
-      // occurrences of (name, isNamed) pairs).
-      val buf = new mutable.ListBuffer[ExportInfo]
-      val seen = new mutable.HashSet[(String, Boolean)]
-      for (exp <- exports) {
-        if (!seen.contains((exp.jsName, exp.isNamed))) {
-          buf += exp
-          seen += ((exp.jsName, exp.isNamed))
-        }
-      }
-
-      buf.toList
+    trait ExportInfo {
+      val jsName: String
+      val pos: Position
+      val isNamed: Boolean
+      val destination: ExportDestination
     }
 
-    private def directExportsOf(sym: Symbol): List[ExportInfo] = {
-      val trgSym = {
-        // For accessors, look on the val/var def
-        if (sym.isAccessor) sym.accessed
-        // For primary class constructors, look on the class itself
-        else if (sym.isPrimaryConstructor && !sym.owner.isModuleClass) sym.owner
-        else sym
+    sealed abstract class JSName {
+      def displayName: String
+    }
+
+    object JSName {
+      // Not final because it causes annoying compile warnings
+      case class Literal(name: String) extends JSName {
+        def displayName: String = name
       }
 
-      // Annotations that are directly on the member
-      val directAnnots = for {
-        annot <- trgSym.annotations
-        if annot.symbol == JSExportAnnotation ||
-           annot.symbol == JSExportNamedAnnotation
-      } yield annot
-
-      // Annotations for this member on the whole unit
-      val unitAnnots = {
-        if (sym.isMethod && sym.isPublic &&
-            !sym.isConstructor && !sym.isSynthetic)
-          sym.owner.annotations.filter(_.symbol == JSExportAllAnnotation)
-        else
-          Nil
-      }
-
-      for {
-        annot <- directAnnots ++ unitAnnots
-      } yield {
-        // Is this a named export or a normal one?
-        val named = annot.symbol == JSExportNamedAnnotation
-
-        def explicitName = annot.stringArg(0).getOrElse {
-          reporter.error(annot.pos,
-            s"The argument to ${annot.symbol.name} must be a literal string")
-          "dummy"
-        }
-
-        val name =
-          if (annot.args.nonEmpty) explicitName
-          else if (sym.isConstructor) decodedFullName(sym.owner)
-          else if (sym.isModuleClass) decodedFullName(sym)
-          else sym.unexpandedName.decoded.stripSuffix("_=")
-
-        // Enforce that methods ending with _= are exported as setters
-        if (sym.isMethod && !sym.isConstructor &&
-          sym.name.decoded.endsWith("_=") && !isJSSetter(sym)) {
-          reporter.error(annot.pos, "A method ending in _= will be exported " +
-              s"as setter. But ${sym.name.decoded} does not have the right " +
-              "signature to do so (single argument, unit return type).")
-        }
-
-        // Enforce no __ in name
-        if (name.contains("__")) {
-          // Get position for error message
-          val pos = if (annot.stringArg(0).isDefined)
-            annot.args.head.pos
-          else trgSym.pos
-
-          reporter.error(pos,
-              "An exported name may not contain a double underscore (`__`)")
-        }
-
-        // Make sure we do not override the default export of toString
-        if (!sym.isConstructor && name == "toString" && !named &&
-            sym.name != nme.toString_ && sym.tpe.params.isEmpty &&
-            !isJSGetter(sym)) {
-          reporter.error(annot.pos, "You may not export a zero-argument " +
-              "method named other than 'toString' under the name 'toString'")
-        }
-
-        if (named && isJSProperty(sym)) {
-          reporter.error(annot.pos,
-              "You may not export a getter or a setter as a named export")
-        }
-
-        ExportInfo(name, annot.pos, named)
+      // Not final because it causes annoying compile warnings
+      case class Computed(sym: Symbol) extends JSName {
+        def displayName: String = sym.fullName
       }
     }
 
-    private def inheritedExportsOf(sym: Symbol): List[ExportInfo] = {
-      // The symbol from which we (potentially) inherit exports. It also
-      // gives the exports their name
-      val trgSym = {
-        if (sym.isModuleClass)
-          sym
-        else if (sym.isConstructor && sym.isPublic &&
-            sym.owner.isConcreteClass && !sym.owner.isModuleClass)
-          sym.owner
-        else NoSymbol
-      }
-
-      if (trgSym == NoSymbol) {
-        Nil
-      } else {
-        val trgAnnot =
-          if (sym.isModuleClass) JSExportDescendentObjectsAnnotation
-          else JSExportDescendentClassesAnnotation
-
-        val forcingSym =
-          trgSym.ancestors.find(_.annotations.exists(_.symbol == trgAnnot))
-
-        val name = decodedFullName(trgSym)
-
-        forcingSym.map { fs =>
-          // Enfore no __ in name
-          if (name.contains("__")) {
-            // Get all annotation positions for error message
-            reporter.error(sym.pos,
-                s"""${trgSym.name} may not have a double underscore (`__`) in its fully qualified
-                   |name, since it is forced to be exported by a @${trgAnnot.name} on ${fs}""".stripMargin)
-          }
-
-          ExportInfo(name, sym.pos, false)
-        }.toList
-      }
+    def clearGlobalState(): Unit = {
+      exportedSymbols.clear()
+      jsNativeLoadSpecs.clear()
     }
 
-    /** Just like sym.fullName, but does not encode components */
-    private def decodedFullName(sym: Symbol): String = {
-      if (sym.isRoot || sym.isRootPackage || sym == NoSymbol) sym.name.decoded
-      else if (sym.owner.isEffectiveRoot) sym.name.decoded
-      else decodedFullName(sym.effectiveOwner.enclClass) + '.' + sym.name.decoded
+    def registerForExport(sym: Symbol, infos: List[ExportInfo]): Unit = {
+      assert(!exportedSymbols.contains(sym),
+          "Same symbol exported twice: " + sym)
+      exportedSymbols.put(sym, infos)
+    }
+
+    def registeredExportsOf(sym: Symbol): List[ExportInfo] = {
+      exportedSymbols.getOrElse(sym, Nil)
     }
 
     /** creates a name for an export specification */
@@ -227,30 +142,100 @@ trait JSGlobalAddons extends JSDefinitions
 
     /** has this symbol to be translated into a JS getter (both directions)? */
     def isJSGetter(sym: Symbol): Boolean = {
-      sym.tpe.params.isEmpty && enteringUncurryIfAtPhaseAfter {
-        sym.tpe.isInstanceOf[NullaryMethodType]
-      }
+      /* We only get here when `sym.isMethod`, thus `sym.isModule` implies that
+       * `sym` is the module's accessor. In 2.12, module accessors are synthesized
+       * after uncurry, thus their first info is a MethodType at phase fields.
+       */
+      sym.isModule || (sym.tpe.params.isEmpty && enteringUncurryIfAtPhaseAfter {
+        sym.tpe match {
+          case _: NullaryMethodType              => true
+          case PolyType(_, _: NullaryMethodType) => true
+          case _                                 => false
+        }
+      })
     }
 
     /** has this symbol to be translated into a JS setter (both directions)? */
-    def isJSSetter(sym: Symbol) = {
-      sym.unexpandedName.decoded.endsWith("_=") &&
-      sym.tpe.resultType.typeSymbol == UnitClass &&
-      enteringUncurryIfAtPhaseAfter {
-        sym.tpe.paramss match {
-          case List(List(arg)) => !isScalaRepeatedParamType(arg.tpe)
-          case _ => false
+    def isJSSetter(sym: Symbol): Boolean =
+      nme.isSetterName(sym.name) && sym.isMethod && !sym.isConstructor
+
+    /** Is this field symbol a static field at the IR level? */
+    def isFieldStatic(sym: Symbol): Boolean = {
+      sym.owner.isModuleClass && // usually false, avoids a lookup in the map
+      registeredExportsOf(sym).nonEmpty
+    }
+
+    /** The export info of a static field.
+     *
+     *  Requires `isFieldStatic(sym)`.
+     *
+     *  The result is non-empty. If it contains an `ExportInfo` with
+     *  `isStatic = true`, then it is the only element in the list. Otherwise,
+     *  all elements have `isTopLevel = true`.
+     */
+    def staticFieldInfoOf(sym: Symbol): List[ExportInfo] =
+      registeredExportsOf(sym)
+
+    /** has this symbol to be translated into a JS bracket access (JS to Scala) */
+    def isJSBracketAccess(sym: Symbol): Boolean =
+      sym.hasAnnotation(JSBracketAccessAnnotation)
+
+    /** has this symbol to be translated into a JS bracket call (JS to Scala) */
+    def isJSBracketCall(sym: Symbol): Boolean =
+      sym.hasAnnotation(JSBracketCallAnnotation)
+
+    /** Gets the unqualified JS name of a symbol.
+     *
+     *  If it is not explicitly specified with an `@JSName` annotation, the
+     *  JS name is inferred from the Scala name.
+     */
+    def jsNameOf(sym: Symbol): JSName = {
+      sym.getAnnotation(JSNameAnnotation).fold[JSName] {
+        val base = sym.unexpandedName.decoded.stripSuffix("_=")
+        val name =
+          if (!sym.isMethod) base.stripSuffix(" ")
+          else base
+        JSName.Literal(name)
+      } { annotation =>
+        annotation.args.head match {
+          case Literal(Constant(name: String)) => JSName.Literal(name)
+          case tree                            => JSName.Computed(tree.symbol)
         }
       }
     }
 
-    /** has this symbol to be translated into a JS bracket access (JS to Scala) */
-    def isJSBracketAccess(sym: Symbol) =
-      sym.hasAnnotation(JSBracketAccessAnnotation)
+    /** Gets the fully qualified JS name of a static module Symbol compiled
+     *  with the 0.6.8 binary format or earlier.
+     */
+    def compat068FullJSNameOf(sym: Symbol): String = {
+      assert(sym.isModuleClass,
+          s"compat068FullJSNameOf called for non-module-class symbol $sym")
+      sym.getAnnotation(JSFullNameAnnotation).flatMap(_.stringArg(0)) getOrElse {
+        /* In 0.6.8, computed names did not exist, so we are necessarily
+         * reading a Literal here.
+         */
+        jsNameOf(sym).asInstanceOf[JSName.Literal].name
+      }
+    }
 
-    /** has this symbol to be translated into a JS bracket call (JS to Scala) */
-    def isJSBracketCall(sym: Symbol) =
-      sym.hasAnnotation(JSBracketCallAnnotation)
+    /** Stores the JS native load spec of a symbol for the current compilation
+     *  run.
+     */
+    def storeJSNativeLoadSpec(sym: Symbol, spec: JSNativeLoadSpec): Unit = {
+      assert(sym.isClass,
+          s"storeJSNativeLoadSpec called for non-class symbol $sym")
+
+      jsNativeLoadSpecs(sym) = spec
+    }
+
+    /** Gets the JS native load spec of a symbol in the current compilation run.
+     */
+    def jsNativeLoadSpecOf(sym: Symbol): JSNativeLoadSpec = {
+      assert(sym.isClass,
+          s"jsNativeLoadSpecOf called for non-class symbol $sym")
+
+      jsNativeLoadSpecs(sym)
+    }
 
   }
 

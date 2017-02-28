@@ -16,9 +16,27 @@ import js.typedarray
 /** Low-level stuff. */
 object Bits {
 
-  val areTypedArraysSupported = js.DynamicImplicits.truthValue(
-      global.ArrayBuffer && global.Int32Array &&
-      global.Float32Array && global.Float64Array)
+  import scala.scalajs.LinkingInfo.assumingES6
+
+  private[this] val _areTypedArraysSupported = {
+    // Here we use `assumingES6` to dce the 4 subsequent tests
+    assumingES6 || js.DynamicImplicits.truthValue(
+        global.ArrayBuffer && global.Int32Array &&
+        global.Float32Array && global.Float64Array)
+  }
+
+  @inline
+  def areTypedArraysSupported: Boolean = {
+    /* We have a forwarder to the internal `val _areTypedArraysSupported` to
+     * be able to inline it. This achieves the following:
+     * * If we emit ES6, dce `|| _areTypedArraysSupported` and replace
+     *   `areTypedArraysSupported` by `true` in the calling code, allowing
+     *   polyfills in the calling code to be dce'ed in turn.
+     * * If we emit ES5, replace `areTypedArraysSupported` by
+     *   `_areTypedArraysSupported` so we do not calculate it multiple times.
+     */
+    assumingES6 || _areTypedArraysSupported
+  }
 
   private val arrayBuffer =
     if (areTypedArraysSupported) new typedarray.ArrayBuffer(8)
@@ -62,7 +80,7 @@ object Bits {
    *  support because we avoid several fround operations.
    */
   def numberHashCode(value: Double): Int = {
-    val iv = value.toInt
+    val iv = rawToInt(value)
     if (iv == value && 1.0/value != Double.NegativeInfinity) iv
     else doubleToLongBits(value).hashCode()
   }
@@ -130,7 +148,7 @@ object Bits {
     val ebits = 8
     val fbits = 23
     val (s, e, f) = encodeIEEE754(ebits, fbits, value)
-    (if (s) 0x80000000 else 0) | (e << fbits) | f.toInt
+    (if (s) 0x80000000 else 0) | (e << fbits) | rawToInt(f)
   }
 
   private def longBitsToDoublePolyfill(bits: Long): Double = {
@@ -152,9 +170,9 @@ object Bits {
     val fbits = 52
     val hifbits = fbits-32
     val (s, e, f) = encodeIEEE754(ebits, fbits, value)
-    val hif = (f / 0x100000000L.toDouble).toInt
+    val hif = rawToInt(f / 0x100000000L.toDouble)
     val hi = (if (s) 0x80000000 else 0) | (e << hifbits) | hif
-    val lo = f.toInt
+    val lo = rawToInt(f)
     (hi.toLong << 32) | (lo.toLong & 0xffffffffL)
   }
 
@@ -207,7 +225,7 @@ object Bits {
       if (av >= pow(2, 1-bias)) {
         val twoPowFbits = pow(2, fbits)
 
-        var e = min(floor(log(av) / LN2).toInt, 1023)
+        var e = min(rawToInt(floor(log(av) / LN2)), 1023)
         var f = roundToEven(av / pow(2, e) * twoPowFbits)
         if (f / twoPowFbits >= 2) {
           e = e + 1
@@ -229,6 +247,9 @@ object Bits {
       }
     }
   }
+
+  @inline private def rawToInt(x: Double): Int =
+    (x.asInstanceOf[js.Dynamic] | 0.asInstanceOf[js.Dynamic]).asInstanceOf[Int]
 
   @inline private[runtime] def roundToEven(n: Double): Double = {
     val w = Math.floor(n)

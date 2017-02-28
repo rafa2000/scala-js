@@ -18,11 +18,15 @@ Harmony project.
 Scala.js is entirely built with [sbt](http://www.scala-sbt.org/).
 To build a local version of the compiler and standard library, run
 
-    > package
+    > library/package
 
 To test your changes, run
 
     > testSuite/test
+
+or test your tests on the JVM.
+
+    > testSuiteJVM/test
 
 If you have changed the IR or the compiler, you typically need to
 
@@ -34,12 +38,16 @@ you typically need to
 
     > reload
 
-To test in fastOpt or fullOpt stage, use the usual Scala.js stage setting:
+To test with Node.js instead of Rhino, use the usual Scala.js setting:
 
-    > set scalaJSStage in Global := FastOptStage
+    > set scalaJSUseRhino in Global := false
 
-By default, the test suite runs with Node.js in linked stages, and requires
-the `source-map-support` package to be installed in `npm`. You can bypass the
+and to run in fullOpt stage:
+
+    > set scalaJSStage in Global := FullOptStage
+
+When running with Node.js, by default, the test suite requires the
+`source-map-support` package to be installed in `npm`. You can bypass the
 source map tests locally with this setting:
 
     > set postLinkJSEnv in testSuite := NodeJSEnv().value.withSourceMap(false)
@@ -65,6 +73,21 @@ run with:
 or, more typically,
 
     > partestSuite/testOnly -- --fastOpt
+
+## Eclipse
+
+If you want to develop in Eclipse, use
+[sbteclipse](https://github.com/typesafehub/sbteclipse). Projects as created by
+the build by default are not suited for Eclipse. You can create *somewhat*
+appropriate projects with:
+
+    $ sbt tools/sources
+    $ GENERATING_ECLIPSE=true sbt "eclipse with-source=true"
+
+You will still have to fix a few things:
+
+* Uncheck the "Allow output directories per source directory" in Build path
+* Add transitive project dependencies in Build path
 
 ## Organization of the repository
 
@@ -123,6 +146,6 @@ following incantations.
 `SCALA_VERSION` refers to the Scala version used by the separate project.
 
     > ++SCALA_VERSION
-    > ;compiler/publishLocal;library/publishLocal;javalibEx/publishLocal;testInterface/publishLocal;stubs/publishLocal
-    > ++2.10.4
-    > ;ir/publishLocal;tools/publishLocal;jsEnvs/publishLocal;testAdapter/publishLocal;sbtPlugin/publishLocal
+    > ;compiler/publishLocal;library/publishLocal;javalibEx/publishLocal;testInterface/publishLocal;stubs/publishLocal;jUnitRuntime/publishLocal;jUnitPlugin/publishLocal
+    > ++2.10.6
+    > ;ir/publishLocal;tools/publishLocal;jsEnvs/publishLocal;jsEnvsTestKit/publishLocal;testAdapter/publishLocal;sbtPlugin/publishLocal

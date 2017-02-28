@@ -13,76 +13,49 @@ final class JSDependencyManifest(
     val libDeps: List[JSDependency],
     val requiresDOM: Boolean,
     val compliantSemantics: List[String]) {
-  def flatten: List[FlatJSDependency] = libDeps.map(_.withOrigin(origin))
+
+  import JSDependencyManifest._
+
+  override def equals(that: Any): Boolean = that match {
+    case that: JSDependencyManifest =>
+      this.origin == that.origin &&
+      this.libDeps == that.libDeps &&
+      this.requiresDOM == that.requiresDOM &&
+      this.compliantSemantics == that.compliantSemantics
+    case _ =>
+      false
+  }
+
+  override def hashCode(): Int = {
+    import scala.util.hashing.MurmurHash3._
+    var acc = HashSeed
+    acc = mix(acc, origin.##)
+    acc = mix(acc, libDeps.##)
+    acc = mix(acc, requiresDOM.##)
+    acc = mixLast(acc, compliantSemantics.##)
+    finalizeHash(acc, 4)
+  }
+
+  override def toString(): String = {
+    val b = new StringBuilder
+    b ++= s"JSDependencyManifest(origin=$origin"
+    if (libDeps.nonEmpty)
+      b ++= s", libDeps=$libDeps"
+    if (requiresDOM)
+      b ++= s", requiresDOM=$requiresDOM"
+    if (compliantSemantics.nonEmpty)
+      b ++= s", compliantSemantics=$compliantSemantics"
+    b ++= ")"
+    b.result()
+  }
 }
 
 object JSDependencyManifest {
 
+  // "org.scalajs.core.tools.jsdep.JSDependencyManifest".##
+  private final val HashSeed = 943487940
+
   final val ManifestFileName = "JS_DEPENDENCIES"
-
-  def createIncludeList(
-      flatDeps: Traversable[FlatJSDependency]): List[ResolutionInfo] = {
-    val jsDeps = mergeManifests(flatDeps)
-
-    // Verify all dependencies are met
-    for {
-      lib <- flatDeps
-      dep <- lib.dependencies
-      if !jsDeps.contains(dep)
-    } throw new MissingDependencyException(lib, dep)
-
-    // Sort according to dependencies and return
-
-    // Very simple O(n²) topological sort for elements assumed to be distinct
-    // Copied :( from GenJSExports (but different exception)
-    @scala.annotation.tailrec
-    def loop(coll: List[ResolutionInfo],
-      acc: List[ResolutionInfo]): List[ResolutionInfo] = {
-
-      if (coll.isEmpty) acc
-      else if (coll.tail.isEmpty) coll.head :: acc
-      else {
-        val (selected, pending) = coll.partition { x =>
-          coll forall { y => (x eq y) || !y.dependencies.contains(x.resourceName) }
-        }
-
-        if (selected.nonEmpty)
-          loop(pending, selected ::: acc)
-        else
-          throw new CyclicDependencyException(pending)
-      }
-    }
-
-    loop(jsDeps.values.toList, Nil)
-  }
-
-  /** Merges multiple JSDependencyManifests into a map of map:
-   *  resourceName -> ResolutionInfo
-   */
-  private def mergeManifests(flatDeps: Traversable[FlatJSDependency]) = {
-    @inline
-    def hasConflict(x: FlatJSDependency, y: FlatJSDependency) = (
-      x.commonJSName.isDefined &&
-      y.commonJSName.isDefined &&
-      (x.resourceName == y.resourceName ^
-       x.commonJSName == y.commonJSName)
-    )
-
-    val conflicts = flatDeps.filter(x =>
-      flatDeps.exists(y => hasConflict(x,y)))
-
-    if (conflicts.nonEmpty)
-      throw new ConflictingNameException(conflicts.toList)
-
-    flatDeps.groupBy(_.resourceName).mapValues { sameName =>
-      new ResolutionInfo(
-        resourceName = sameName.head.resourceName,
-        dependencies = sameName.flatMap(_.dependencies).toSet,
-        origins = sameName.map(_.origin).toList,
-        commonJSName = sameName.flatMap(_.commonJSName).headOption
-      )
-    }
-  }
 
   implicit object JSDepManJSONSerializer extends JSONSerializer[JSDependencyManifest] {
     @inline def optList[T](x: List[T]): Option[List[T]] =

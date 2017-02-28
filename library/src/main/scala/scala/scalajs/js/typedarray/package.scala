@@ -12,42 +12,42 @@ package object typedarray {
   // Implicit classes scala.Array -> TypedArray
 
   /** <span class="badge badge-ecma6" style="float: right;">ECMAScript 6</span>
-   *  Adds `toTypedArray` conversion to a [[scala.Array[Byte]]]
+   *  Adds `toTypedArray` conversion to an `Array[Byte]`
    */
   implicit class AB2TA(val array: scala.Array[Byte]) extends AnyVal {
     def toTypedArray: Int8Array = byteArray2Int8Array(array)
   }
 
   /** <span class="badge badge-ecma6" style="float: right;">ECMAScript 6</span>
-   *  Adds `toTypedArray` conversion to a [[scala.Array[Short]]]
+   *  Adds `toTypedArray` conversion to an `Array[Short]`
    */
   implicit class AS2TA(val array: scala.Array[Short]) extends AnyVal {
     def toTypedArray: Int16Array = shortArray2Int16Array(array)
   }
 
   /** <span class="badge badge-ecma6" style="float: right;">ECMAScript 6</span>
-   *  Adds `toTypedArray` conversion to a [[scala.Array[Char]]]
+   *  Adds `toTypedArray` conversion to an `Array[Char]`
    */
   implicit class AC2TA(val array: scala.Array[Char]) extends AnyVal {
     def toTypedArray: Uint16Array = charArray2Uint16Array(array)
   }
 
   /** <span class="badge badge-ecma6" style="float: right;">ECMAScript 6</span>
-   *  Adds `toTypedArray` conversion to a [[scala.Array[Int]]]
+   *  Adds `toTypedArray` conversion to an `Array[Int]`
    */
   implicit class AI2TA(val array: scala.Array[Int]) extends AnyVal {
     def toTypedArray: Int32Array = intArray2Int32Array(array)
   }
 
   /** <span class="badge badge-ecma6" style="float: right;">ECMAScript 6</span>
-   *  Adds `toTypedArray` conversion to a [[scala.Array[Float]]]
+   *  Adds `toTypedArray` conversion to an `Array[Float]`
    */
   implicit class AF2TA(val array: scala.Array[Float]) extends AnyVal {
     def toTypedArray: Float32Array = floatArray2Float32Array(array)
   }
 
   /** <span class="badge badge-ecma6" style="float: right;">ECMAScript 6</span>
-   *  Adds `toTypedArray` conversion to a [[scala.Array[Double]]]
+   *  Adds `toTypedArray` conversion to an `Array[Double]`
    */
   implicit class AD2TA(val array: scala.Array[Double]) extends AnyVal {
     def toTypedArray: Float64Array = doubleArray2Float64Array(array)
@@ -126,7 +126,7 @@ package object typedarray {
   def doubleArray2Float64Array(array: scala.Array[Double]): Float64Array =
     array2typedArrayImpl(array, new Float64Array(array.length))
 
-  @inline private def array2typedArrayImpl[
+  @inline private def array2typedArrayImpl[ // scalastyle:ignore
       @specialized(Byte, Short, Int, Float, Double) T,
       Repr <: TypedArray[T, Repr]](
       array: scala.Array[T], dest: Repr): Repr = {
@@ -168,7 +168,7 @@ package object typedarray {
   def float64Array2DoubleArray(array: Float64Array): scala.Array[Double] =
     typedArray2arrayImpl(array, new scala.Array(array.length))
 
-  @inline private def typedArray2arrayImpl[
+  @inline private def typedArray2arrayImpl[ // scalastyle:ignore
       @specialized(Byte, Short, Int, Float, Double) T,
       Repr <: TypedArray[T, Repr]](
       array: Repr, dest: scala.Array[T]): scala.Array[T] = {

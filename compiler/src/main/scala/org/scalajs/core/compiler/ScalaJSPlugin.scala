@@ -25,23 +25,25 @@ class ScalaJSPlugin(val global: Global) extends NscPlugin {
   val name = "scalajs"
   val description = "Compile to JavaScript"
   val components = {
-    if (global.forScaladoc)
+    if (global.forScaladoc) {
       List[NscPluginComponent](PrepInteropComponent)
-    else
-      List[NscPluginComponent](PrepInteropComponent, GenCodeComponent)
+    } else {
+      List[NscPluginComponent](PreTyperComponentComponent, PrepInteropComponent,
+          GenCodeComponent)
+    }
   }
 
   /** Called when the JS ASTs are generated. Override for testing */
   def generatedJSAST(clDefs: List[Trees.Tree]): Unit = {}
 
   /** Addons for JavaScript platform */
-  object jsAddons extends {
+  object jsAddons extends { // scalastyle:ignore
     val global: ScalaJSPlugin.this.global.type = ScalaJSPlugin.this.global
   } with JSGlobalAddons with Compat210Component
 
-  object scalaJSOpts extends ScalaJSOptions {
+  object scalaJSOpts extends ScalaJSOptions { // scalastyle:ignore
     import ScalaJSOptions.URIMap
-    var fixClassOf:   Boolean     = false
+    var fixClassOf: Boolean = false
     lazy val sourceURIMaps: List[URIMap] = {
       if (_sourceURIMaps.nonEmpty)
         _sourceURIMaps.reverse
@@ -52,6 +54,21 @@ class ScalaJSPlugin(val global: Global) extends NscPlugin {
     var relSourceMap: Option[URI] = None
     var absSourceMap: Option[URI] = None
   }
+
+  /** Checks and registers module exports on the symbol.
+   *  This bridge allows other plugins (such as ScalaJSJUnitPlugin) to register
+   *  new modules for export between jsinterop and jscode phases. It is meant to
+   *  be accessed using reflection. The calling code still must insert the
+   *  `@JSExport` annotation to the module.
+   */
+  def registerModuleExports(sym: Symbol): Unit =
+    PrepInteropComponent.registerModuleExports(sym)
+
+  object PreTyperComponentComponent extends {
+    val global: ScalaJSPlugin.this.global.type = ScalaJSPlugin.this.global
+    val runsAfter = List("parser")
+    override val runsBefore = List("namer")
+  } with PreTyperComponent
 
   object PrepInteropComponent extends {
     val global: ScalaJSPlugin.this.global.type = ScalaJSPlugin.this.global
@@ -68,7 +85,7 @@ class ScalaJSPlugin(val global: Global) extends NscPlugin {
     override val runsAfter = List("mixin")
     override val runsBefore = List("delambdafy", "cleanup", "terminal")
   } with GenJSCode {
-    def generatedJSAST(clDefs: List[Trees.Tree]) =
+    def generatedJSAST(clDefs: List[Trees.Tree]): Unit =
       ScalaJSPlugin.this.generatedJSAST(clDefs)
   }
 

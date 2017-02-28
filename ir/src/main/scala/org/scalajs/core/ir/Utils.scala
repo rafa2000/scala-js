@@ -9,9 +9,14 @@
 
 package org.scalajs.core.ir
 
+import java.io.StringWriter
 import java.net.URI
 
+import scala.annotation.switch
+
 object Utils {
+
+  private final val EscapeJSChars = "\\a\\b\\t\\n\\v\\f\\r\\\"\\\\"
 
   /** Relativize target URI w.r.t. base URI */
   def relativize(base0: URI, trgt0: URI): URI = {
@@ -24,8 +29,11 @@ object Utils {
         base.getRawAuthority != trgt.getRawAuthority)
       trgt
     else {
-      val trgtCmps = trgt.getRawPath.split('/')
-      val baseCmps = base.getRawPath.split('/')
+      val trgtCmps = trgt.getRawPath.split("/", -1)
+
+      // Disregard the last element, since it is the filename
+      // (or empty string for a directory).
+      val baseCmps = base.getRawPath.split("/", -1).init
 
       val prefixLen = (trgtCmps zip baseCmps).takeWhile(t => t._1 == t._2).size
 
@@ -47,25 +55,67 @@ object Utils {
     else new URI("file", "", uri.getPath(), uri.getQuery(), uri.getFragment())
 
   def escapeJS(str: String): String = {
+    // scalastyle:off return
+    val end = str.length
+    var i = 0
+    while (i != end) {
+      val c = str.charAt(i)
+      if (c >= 32 && c <= 126 && c != '\\' && c != '"')
+        i += 1
+      else
+        return createEscapeJSString(str)
+    }
+    str
+    // scalastyle:on return
+  }
+
+  private def createEscapeJSString(str: String): String = {
+    val sb = new java.lang.StringBuilder(2 * str.length)
+    printEscapeJS(str, sb)
+    sb.toString
+  }
+
+  def printEscapeJS(str: String, out: java.lang.Appendable): Unit = {
     /* Note that Java and JavaScript happen to use the same encoding for
      * Unicode, namely UTF-16, which means that 1 char from Java always equals
      * 1 char in JavaScript. */
-    val builder = new StringBuilder
-    str foreach {
-      case '\\'     => builder.append("\\\\")
-      case '"'      => builder.append("\\\"")
-      case '\u0007' => builder.append("\\a")
-      case '\u0008' => builder.append("\\b")
-      case '\u0009' => builder.append("\\t")
-      case '\u000A' => builder.append("\\n")
-      case '\u000B' => builder.append("\\v")
-      case '\u000C' => builder.append("\\f")
-      case '\u000D' => builder.append("\\r")
-      case c =>
-        if (c >= 32 && c <= 126) builder.append(c.toChar) // ASCII printable characters
-        else builder.append(f"\\u$c%04x")
+    val end = str.length()
+    var i = 0
+    /* Loop prints all consecutive ASCII printable characters starting
+     * from current i and one non ASCII printable character (if it exists).
+     * The new i is set at the end of the appended characters.
+     */
+    while (i != end) {
+      val start = i
+      var c: Int = str.charAt(i)
+      // Find all consecutive ASCII printable characters from `start`
+      while (i != end && c >= 32 && c <= 126 && c != 34 && c != 92) {
+        i += 1
+        if (i != end)
+          c = str.charAt(i)
+      }
+      // Print ASCII printable characters from `start`
+      if (start != i)
+        out.append(str, start, i)
+
+      // Print next non ASCII printable character
+      if (i != end) {
+        def escapeJSEncoded(c: Int): Unit = {
+          if (6 < c && c < 14) {
+            val i = 2 * (c - 7)
+            out.append(EscapeJSChars, i, i + 2)
+          } else if (c == 34) {
+            out.append(EscapeJSChars, 14, 16)
+          } else if (c == 92) {
+            out.append(EscapeJSChars, 16, 18)
+          } else {
+            out.append(f"\\u$c%04x")
+          }
+        }
+        escapeJSEncoded(c)
+        i += 1
+      }
     }
-    builder.result()
   }
 
   /** A ByteArrayOutput stream that allows to jump back to a given

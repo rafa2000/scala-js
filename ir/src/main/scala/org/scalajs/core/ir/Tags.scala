@@ -14,6 +14,7 @@ private[ir] object Tags {
 
   // Tags for Trees
 
+  /** Use to denote optional trees. */
   final val TagEmptyTree = 1
 
   final val TagVarDef = TagEmptyTree + 1
@@ -27,7 +28,10 @@ private[ir] object Tags {
   final val TagIf = TagReturn + 1
   final val TagWhile = TagIf + 1
   final val TagDoWhile = TagWhile + 1
+
+  // TODO remove when we can break binary compat.
   final val TagTry = TagDoWhile + 1
+
   final val TagThrow = TagTry + 1
   final val TagContinue = TagThrow + 1
   final val TagMatch = TagContinue + 1
@@ -67,7 +71,7 @@ private[ir] object Tags {
   final val TagJSEnvInfo = TagJSObjectConstr + 1
 
   final val TagUndefined = TagJSEnvInfo + 1
-  final val TagUndefinedParam = TagUndefined + 1
+  final val TagUndefinedParam = TagUndefined + 1 // TODO Move this
   final val TagNull = TagUndefinedParam + 1
   final val TagBooleanLiteral = TagNull + 1
   final val TagIntLiteral = TagBooleanLiteral + 1
@@ -88,6 +92,23 @@ private[ir] object Tags {
   final val TagConstructorExportDef = TagPropertyDef + 1
   final val TagModuleExportDef = TagConstructorExportDef + 1
 
+  // TODO Reorganize these when we can break binary compatibility
+  final val TagJSSpread = TagModuleExportDef + 1
+  final val TagJSLinkingInfo = TagJSSpread + 1
+  final val TagStringLitFieldDef = TagJSLinkingInfo + 1
+  final val TagJSSuperBracketSelect = TagStringLitFieldDef + 1
+  final val TagJSSuperBracketCall = TagJSSuperBracketSelect + 1
+  final val TagJSSuperConstructorCall = TagJSSuperBracketCall + 1
+  final val TagLoadJSConstructor = TagJSSuperConstructorCall + 1
+  final val TagLoadJSModule = TagLoadJSConstructor + 1
+  final val TagJSClassExportDef = TagLoadJSModule + 1
+  final val TagTryCatch = TagJSClassExportDef + 1
+  final val TagTryFinally = TagTryCatch + 1
+  final val TagTopLevelMethodExportDef = TagTryFinally + 1
+  final val TagSelectStatic = TagTopLevelMethodExportDef + 1
+  final val TagTopLevelFieldExportDef = TagSelectStatic + 1
+  final val TagTopLevelModuleExportDef = TagTopLevelFieldExportDef + 1
+
   // Tags for Types
 
   final val TagAnyType = 1
@@ -104,5 +125,17 @@ private[ir] object Tags {
   final val TagArrayType = TagClassType + 1
   final val TagRecordType = TagArrayType + 1
   final val TagNoType = TagRecordType + 1
+
+  // Tags for PropertyNames
+
+  final val TagPropertyNameIdent = 1
+  final val TagPropertyNameStringLiteral = TagPropertyNameIdent + 1
+  final val TagPropertyNameComputedName = TagPropertyNameStringLiteral + 1
+
+  // Tags for JS native loading specs
+
+  final val TagJSNativeLoadSpecNone = 0
+  final val TagJSNativeLoadSpecGlobal = TagJSNativeLoadSpecNone + 1
+  final val TagJSNativeLoadSpecImport = TagJSNativeLoadSpecGlobal + 1
 
 }

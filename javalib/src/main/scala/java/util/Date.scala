@@ -71,7 +71,7 @@ class Date private (private val date: js.Date) extends Object
   def getTime(): Long = date.getTime().toLong
 
   @Deprecated
-  def getTimeZoneOffset(): Int = date.getTimezoneOffset()
+  def getTimezoneOffset(): Int = date.getTimezoneOffset()
 
   @Deprecated
   def getYear(): Int = date.getFullYear() - 1900
@@ -113,12 +113,12 @@ class Date private (private val date: js.Date) extends Object
 
   override def toString(): String = {
     val offset = -date.getTimezoneOffset()
-    val sign = if(offset < 0) "-" else "+"
+    val sign = if (offset < 0) "-" else "+"
     val hours = pad0(Math.abs(offset) / 60)
     val mins = pad0(Math.abs(offset) % 60)
     Days(date.getDay()) + " "+ Months(date.getMonth()) + " " +
-      pad0(date.getHours()) + ":" + pad0(date.getMinutes()) + ":" +
-      pad0(date.getSeconds()) + " GMT" + sign + hours + mins + " " +
+      pad0(date.getDate()) + " " + pad0(date.getHours()) + ":" +
+      pad0(date.getMinutes()) + ":" + pad0(date.getSeconds()) + " GMT" + " " +
       date.getFullYear()
   }
 }

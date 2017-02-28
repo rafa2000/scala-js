@@ -1,7 +1,5 @@
 package org.scalajs.core.tools.io
 
-import scala.annotation.tailrec
-
 import java.io._
 import java.net.URI
 
@@ -9,9 +7,9 @@ import java.net.URI
 class FileVirtualFile(val file: File) extends VirtualFile {
   import FileVirtualFile._
 
-  override def path = file.getPath
+  override def path: String = file.getPath
 
-  override def name = file.getName
+  override def name: String = file.getName
 
   override def version: Option[String] = {
     if (!file.isFile) None
@@ -137,6 +135,13 @@ class FileVirtualJSFile(f: File) extends FileVirtualTextFile(f)
 object FileVirtualJSFile extends (File => FileVirtualJSFile) {
   def apply(f: File): FileVirtualJSFile =
     new FileVirtualJSFile(f)
+
+  def relative(f: File,
+      relPath: String): FileVirtualJSFile with RelativeVirtualFile = {
+    new FileVirtualJSFile(f) with RelativeVirtualFile {
+      def relativePath: String = relPath
+    }
+  }
 }
 
 trait WritableFileVirtualJSFile extends FileVirtualJSFile
@@ -162,6 +167,13 @@ object FileVirtualScalaJSIRFile extends (File => FileVirtualScalaJSIRFile) {
 
   def apply(f: File): FileVirtualScalaJSIRFile =
     new FileVirtualScalaJSIRFile(f)
+
+  def relative(f: File,
+      relPath: String): FileVirtualScalaJSIRFile with RelativeVirtualFile = {
+    new FileVirtualScalaJSIRFile(f) with RelativeVirtualFile {
+      def relativePath: String = relPath
+    }
+  }
 
   def isScalaJSIRFile(file: File): Boolean =
     hasExtension(file, ".sjsir")

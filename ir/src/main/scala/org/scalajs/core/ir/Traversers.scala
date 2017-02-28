@@ -48,9 +48,12 @@ object Traversers {
         traverse(body)
         traverse(cond)
 
-      case Try(block, errVar, handler, finalizer) =>
+      case TryCatch(block, errVar, handler) =>
         traverse(block)
         traverse(handler)
+
+      case TryFinally(block, finalizer) =>
+        traverse(block)
         traverse(finalizer)
 
       case Throw(expr) =>
@@ -147,6 +150,21 @@ object Traversers {
         traverse(method)
         args foreach traverse
 
+      case JSSuperBracketSelect(cls, qualifier, item) =>
+        traverse(qualifier)
+        traverse(item)
+
+      case JSSuperBracketCall(cls, receiver, method, args) =>
+        traverse(receiver)
+        traverse(method)
+        args foreach traverse
+
+      case JSSuperConstructorCall(args) =>
+        args foreach traverse
+
+      case JSSpread(items) =>
+        traverse(items)
+
       case JSDelete(prop) =>
         traverse(prop)
 
@@ -161,7 +179,14 @@ object Traversers {
         items foreach traverse
 
       case JSObjectConstr(fields) =>
-        fields foreach { f => traverse(f._2) }
+        for ((key, value) <- fields) {
+          key match {
+            case ComputedName(tree, _) =>
+              traverse(tree)
+            case _ =>
+          }
+          traverse(value)
+        }
 
       // Atomic expressions
 
@@ -175,20 +200,27 @@ object Traversers {
         defs foreach traverse
 
       case MethodDef(static, name, args, resultType, body) =>
-        traverse(body)
+        body.foreach(traverse)
 
-      case PropertyDef(name, getterBody, setterArg, setterBody) =>
-        traverse(getterBody)
-        traverse(setterBody)
+      case PropertyDef(static, name, getterBody, setterArgAndBody) =>
+        getterBody.foreach(traverse)
+        setterArgAndBody foreach { case (_, body) =>
+          traverse(body)
+        }
 
       case ConstructorExportDef(fullName, args, body) =>
         traverse(body)
 
+      case TopLevelMethodExportDef(methodDef) =>
+        traverse(methodDef)
+
       // Trees that need not be traversed
 
-      case _:Skip | _:Continue | _:Debugger | _:LoadModule | _:JSEnvInfo |
-          _:Literal | _:VarRef | _:This | _:FieldDef | _:ModuleExportDef |
-          EmptyTree =>
+      case _:Skip | _:Continue | _:Debugger | _:LoadModule | _:SelectStatic |
+          _:LoadJSConstructor | _:LoadJSModule | _:JSLinkingInfo | _:Literal |
+          _:UndefinedParam | _:VarRef | _:This | _:FieldDef |
+          _:JSClassExportDef | _:ModuleExportDef | _:TopLevelModuleExportDef |
+          _:TopLevelFieldExportDef =>
 
       case _ =>
         sys.error(s"Invalid tree in traverse() of class ${tree.getClass}")

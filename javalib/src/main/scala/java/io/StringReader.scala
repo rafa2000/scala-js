@@ -43,11 +43,14 @@ class StringReader(s: String) extends Reader {
         i += 1
       }
       pos += count
-      count
+      if (count == 0) -1 else count
     }
   }
 
-  override def ready(): Boolean = pos < s.length
+  override def ready(): Boolean = {
+    ensureOpen()
+    true
+  }
 
   override def reset(): Unit = {
     ensureOpen()

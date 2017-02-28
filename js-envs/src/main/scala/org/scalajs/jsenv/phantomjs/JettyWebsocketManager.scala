@@ -8,7 +8,7 @@ import org.eclipse.jetty.websocket.{WebSocket, WebSocketHandler}
 import org.eclipse.jetty.util.component.{LifeCycle, AbstractLifeCycle}
 import org.eclipse.jetty.util.log
 
-final class JettyWebsocketManager(
+private[phantomjs] final class JettyWebsocketManager(
     wsListener: WebsocketListener) extends WebsocketManager { thisMgr =>
 
   private[this] var webSocketConn: WebSocket.Connection = null
@@ -47,6 +47,7 @@ final class JettyWebsocketManager(
       thisMgr.synchronized {
         if (isConnected)
           throw new IllegalStateException("Client connected twice")
+        connection.setMaxIdleTime(Int.MaxValue)
         webSocketConn = connection
       }
       wsListener.onOpen()
@@ -118,7 +119,7 @@ final class JettyWebsocketManager(
 
   def localPort: Int = connector.getLocalPort()
 
-  def sendMessage(msg: String) = synchronized {
+  def sendMessage(msg: String): Unit = synchronized {
     if (webSocketConn != null)
       webSocketConn.sendMessage(msg)
   }

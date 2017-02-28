@@ -3,12 +3,25 @@ package java.lang
 import java.io._
 
 import scala.scalajs.js
-import js.Dynamic.global
+import scala.scalajs.js.Dynamic.global
+import scala.scalajs.LinkingInfo.assumingES6
+import scala.scalajs.runtime.{environmentInfo, linkingInfo, SemanticsUtils}
+
+import java.{util => ju}
 
 object System {
   var out: PrintStream = new JSConsoleBasedPrintStream(isErr = false)
   var err: PrintStream = new JSConsoleBasedPrintStream(isErr = true)
   var in: InputStream = null
+
+  def setIn(in: InputStream): Unit =
+    this.in = in
+
+  def setOut(out: PrintStream): Unit =
+    this.out = out
+
+  def setErr(err: PrintStream): Unit =
+    this.err = err
 
   def currentTimeMillis(): scala.Long = {
     (new js.Date).getTime().toLong
@@ -40,9 +53,13 @@ object System {
     import scala.{Boolean, Char, Byte, Short, Int, Long, Float, Double}
 
     @inline def checkIndices(srcLen: Int, destLen: Int): Unit = {
-      if (srcPos < 0 || destPos < 0 || length < 0 ||
-          srcPos + length > srcLen || destPos + length > destLen)
-        throw new ArrayIndexOutOfBoundsException("Array index out of bounds")
+      SemanticsUtils.arrayIndexOutOfBoundsCheck({
+        srcPos < 0 || destPos < 0 || length < 0 ||
+        srcPos > srcLen - length ||
+        destPos > destLen - length
+      }, {
+        new ArrayIndexOutOfBoundsException()
+      })
     }
 
     def mismatch(): Nothing =
@@ -143,17 +160,39 @@ object System {
       case _:scala.Boolean | _:scala.Double | _:String | () =>
         x.hashCode()
       case _ =>
+        import IDHashCode._
         if (x.getClass == null) {
-          // This is not a Scala.js object
-          42
-        } else {
-          val hash = x.asInstanceOf[js.Dynamic].selectDynamic("$idHashCode$0")
+          // This is not a Scala.js object: delegate to x.hashCode()
+          x.hashCode()
+        } else if (assumingES6 || idHashCodeMap != null) {
+          // Use the global WeakMap of attributed id hash codes
+          val hash = idHashCodeMap.get(x.asInstanceOf[js.Any])
           if (!js.isUndefined(hash)) {
             hash.asInstanceOf[Int]
           } else {
-            val newHash = IDHashCode.nextIDHashCode()
+            val newHash = nextIDHashCode()
+            idHashCodeMap.set(x.asInstanceOf[js.Any], newHash)
+            newHash
+          }
+        } else {
+          val hash = x.asInstanceOf[js.Dynamic].selectDynamic("$idHashCode$0")
+          if (!js.isUndefined(hash)) {
+            /* Note that this can work even if x is sealed, if
+             * identityHashCode() was called for the first time before x was
+             * sealed.
+             */
+            hash.asInstanceOf[Int]
+          } else if (!js.Object.isSealed(x.asInstanceOf[js.Object])) {
+            /* If x is not sealed, we can (almost) safely create an additional
+             * field with a bizarre and relatively long name, even though it is
+             * technically undefined behavior.
+             */
+            val newHash = nextIDHashCode()
             x.asInstanceOf[js.Dynamic].updateDynamic("$idHashCode$0")(newHash)
             newHash
+          } else {
+            // Otherwise, we unfortunately have to return a constant.
+            42
           }
         }
     }
@@ -162,6 +201,12 @@ object System {
   private object IDHashCode {
     private var lastIDHashCode: Int = 0
 
+    val idHashCodeMap =
+      if (assumingES6 || !js.isUndefined(global.WeakMap))
+        js.Dynamic.newInstance(global.WeakMap)()
+      else
+        null
+
     def nextIDHashCode(): Int = {
       val r = lastIDHashCode + 1
       lastIDHashCode = r
@@ -169,17 +214,69 @@ object System {
     }
   }
 
-  //def getProperties(): java.util.Properties
-  //def getProperty(key: String): String
-  //def getProperty(key: String, default: String): String
-  //def clearProperty(key: String): String
-  //def setProperty(key: String, value: String): String
+  private object SystemProperties {
+    var value = loadSystemProperties()
 
-  //def getenv(): java.util.Map[String,String]
-  //def getenv(name: String): String
+    private[System] def loadSystemProperties(): ju.Properties = {
+      val sysProp = new ju.Properties()
+      sysProp.setProperty("java.version", "1.8")
+      sysProp.setProperty("java.vm.specification.version", "1.8")
+      sysProp.setProperty("java.vm.specification.vendor", "Oracle Corporation")
+      sysProp.setProperty("java.vm.specification.name", "Java Virtual Machine Specification")
+      sysProp.setProperty("java.vm.name", "Scala.js")
+      linkingInfo.linkerVersion.foreach(v => sysProp.setProperty("java.vm.version", v))
+      sysProp.setProperty("java.specification.version", "1.8")
+      sysProp.setProperty("java.specification.vendor", "Oracle Corporation")
+      sysProp.setProperty("java.specification.name", "Java Platform API Specification")
+      sysProp.setProperty("file.separator", "/")
+      sysProp.setProperty("path.separator", ":")
+      sysProp.setProperty("line.separator", "\n")
 
-  def exit(status: scala.Int) = Runtime.getRuntime().exit(status)
-  def gc() = Runtime.getRuntime().gc()
+      for {
+        jsEnvProperties <- environmentInfo.javaSystemProperties
+        (key, value) <- jsEnvProperties
+      } {
+        sysProp.setProperty(key, value)
+      }
+      sysProp
+    }
+  }
+
+  def getProperties(): ju.Properties =
+    SystemProperties.value
+
+  def lineSeparator(): String = "\n"
+
+  def setProperties(properties: ju.Properties): Unit = {
+    SystemProperties.value =
+      if (properties != null) properties
+      else SystemProperties.loadSystemProperties()
+  }
+
+  def getProperty(key: String): String =
+    SystemProperties.value.getProperty(key)
+
+  def getProperty(key: String, default: String): String =
+    SystemProperties.value.getProperty(key, default)
+
+  def clearProperty(key: String): String =
+    SystemProperties.value.remove(key).asInstanceOf[String]
+
+  def setProperty(key: String, value: String): String =
+    SystemProperties.value.setProperty(key, value).asInstanceOf[String]
+
+  def getenv(): ju.Map[String, String] =
+    ju.Collections.emptyMap()
+
+  def getenv(name: String): String = {
+    if (name eq null)
+      throw new NullPointerException
+
+    null
+  }
+
+  def exit(status: scala.Int): Unit = Runtime.getRuntime().exit(status)
+  def gc(): Unit = Runtime.getRuntime().gc()
 }
 
 private[lang] final class JSConsoleBasedPrintStream(isErr: Boolean)
@@ -224,6 +321,10 @@ private[lang] final class JSConsoleBasedPrintStream(isErr: Boolean)
   override def print(obj: AnyRef): Unit          = printString(String.valueOf(obj))
 
   override def println(): Unit = printString("\n")
+
+  // This is the method invoked by Predef.println(x).
+  @inline
+  override def println(obj: AnyRef): Unit = printString("" + obj + "\n")
 
   private def printString(s: String): Unit = {
     var rest: String = s

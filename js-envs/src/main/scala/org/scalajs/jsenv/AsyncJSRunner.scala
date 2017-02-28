@@ -3,6 +3,8 @@ package org.scalajs.jsenv
 import scala.concurrent.{Future, Await}
 import scala.concurrent.duration.Duration
 
+import org.scalajs.core.tools.logging.Logger
+
 trait AsyncJSRunner {
 
   /** A future that completes when the associated run has terminated. */
@@ -13,7 +15,7 @@ trait AsyncJSRunner {
    *  when the run terminates. The returned Future is equivalent to
    *  the one returned by [[future]].
    */
-  def start(): Future[Unit]
+  def start(logger: Logger, console: JSConsole): Future[Unit]
 
   /** Aborts the associated run.
    *
@@ -47,7 +49,7 @@ trait AsyncJSRunner {
   final def await(): Unit = Await.result(future, Duration.Inf)
 
   /** Await completion of the started Run for the duration specified
-   *  by [[atMost]]. Strictly equivalent to:
+   *  by `atMost`. Strictly equivalent to:
    *
    *  {{{
    *  Await.result(future, atMost)
@@ -57,10 +59,10 @@ trait AsyncJSRunner {
   final def await(atMost: Duration): Unit = Await.result(future, atMost)
 
   /** Awaits completion of the started Run for the duration specified by
-   *  [[atMost]], or force it to stop.
+   *  `atMost`, or force it to stop.
    *
    *  If any exception is thrown while awaiting completion (including a
-   *  [[scala.concurrent.TimeoutException TimeoutException]], forces the runner
+   *  [[scala.concurrent.TimeoutException TimeoutException]]), forces the runner
    *  to stop by calling `stop()` before rethrowing the exception.
    *
    *  Strictly equivalent to:

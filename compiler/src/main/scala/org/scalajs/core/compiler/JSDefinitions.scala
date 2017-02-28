@@ -14,7 +14,9 @@ import scala.tools.nsc._
 trait JSDefinitions { self: JSGlobalAddons =>
   import global._
 
-  object jsDefinitions extends JSDefinitionsClass
+  // scalastyle:off line.size.limit
+
+  object jsDefinitions extends JSDefinitionsClass // scalastyle:ignore
 
   import definitions._
   import rootMirror._
@@ -22,11 +24,13 @@ trait JSDefinitions { self: JSGlobalAddons =>
   class JSDefinitionsClass {
 
     lazy val ScalaJSJSPackage = getPackage(newTermNameCached("scala.scalajs.js")) // compat 2.10/2.11
-      lazy val JSPackage_typeOf   = getMemberMethod(ScalaJSJSPackage, newTermName("typeOf"))
-      lazy val JSPackage_debugger = getMemberMethod(ScalaJSJSPackage, newTermName("debugger"))
-      lazy val JSPackage_native   = getMemberMethod(ScalaJSJSPackage, newTermName("native"))
+      lazy val JSPackage_typeOf        = getMemberMethod(ScalaJSJSPackage, newTermName("typeOf"))
+      lazy val JSPackage_constructorOf = getMemberMethod(ScalaJSJSPackage, newTermName("constructorOf"))
+      lazy val JSPackage_debugger      = getMemberMethod(ScalaJSJSPackage, newTermName("debugger"))
+      lazy val JSPackage_native        = getMemberMethod(ScalaJSJSPackage, newTermName("native"))
+      lazy val JSPackage_undefined     = getMemberMethod(ScalaJSJSPackage, newTermName("undefined"))
 
-    lazy val ScalaJSJSPrimPackage = getPackage(newTermNameCached("scala.scalajs.js.prim")) // compat 2.10/2.11
+    lazy val JSNativeAnnotation = getRequiredClass("scala.scalajs.js.native")
 
     lazy val JSAnyClass       = getRequiredClass("scala.scalajs.js.Any")
     lazy val JSDynamicClass   = getRequiredClass("scala.scalajs.js.Dynamic")
@@ -38,6 +42,7 @@ trait JSDefinitions { self: JSGlobalAddons =>
     lazy val JSGlobalScopeClass = getRequiredClass("scala.scalajs.js.GlobalScope")
 
     lazy val UndefOrClass = getRequiredClass("scala.scalajs.js.UndefOr")
+    lazy val UnionClass = getRequiredClass("scala.scalajs.js.$bar")
 
     lazy val JSArrayClass = getRequiredClass("scala.scalajs.js.Array")
       lazy val JSArray_apply  = getMemberMethod(JSArrayClass, newTermName("apply"))
@@ -51,6 +56,7 @@ trait JSDefinitions { self: JSGlobalAddons =>
     lazy val JavaScriptExceptionClass = getClassIfDefined("scala.scalajs.js.JavaScriptException")
 
     lazy val JSNameAnnotation          = getRequiredClass("scala.scalajs.js.annotation.JSName")
+    lazy val JSFullNameAnnotation      = getRequiredClass("scala.scalajs.js.annotation.JSFullName")
     lazy val JSBracketAccessAnnotation = getRequiredClass("scala.scalajs.js.annotation.JSBracketAccess")
     lazy val JSBracketCallAnnotation   = getRequiredClass("scala.scalajs.js.annotation.JSBracketCall")
     lazy val JSExportAnnotation        = getRequiredClass("scala.scalajs.js.annotation.JSExport")
@@ -58,6 +64,18 @@ trait JSDefinitions { self: JSGlobalAddons =>
     lazy val JSExportDescendentClassesAnnotation = getRequiredClass("scala.scalajs.js.annotation.JSExportDescendentClasses")
     lazy val JSExportAllAnnotation     = getRequiredClass("scala.scalajs.js.annotation.JSExportAll")
     lazy val JSExportNamedAnnotation   = getRequiredClass("scala.scalajs.js.annotation.JSExportNamed")
+    lazy val JSExportStaticAnnotation  = getRequiredClass("scala.scalajs.js.annotation.JSExportStatic")
+    lazy val JSExportTopLevelAnnotation = getRequiredClass("scala.scalajs.js.annotation.JSExportTopLevel")
+    lazy val JSImportAnnotation        = getRequiredClass("scala.scalajs.js.annotation.JSImport")
+    lazy val JSGlobalScopeAnnotation   = getRequiredClass("scala.scalajs.js.annotation.JSGlobalScope")
+    lazy val ScalaJSDefinedAnnotation  = getRequiredClass("scala.scalajs.js.annotation.ScalaJSDefined")
+    lazy val SJSDefinedAnonymousClassAnnotation = getRequiredClass("scala.scalajs.js.annotation.SJSDefinedAnonymousClass")
+    lazy val HasJSNativeLoadSpecAnnotation = getRequiredClass("scala.scalajs.js.annotation.internal.HasJSNativeLoadSpec")
+    lazy val JSOptionalAnnotation      = getRequiredClass("scala.scalajs.js.annotation.internal.JSOptional")
+
+    lazy val JavaDefaultMethodAnnotation = getRequiredClass("scala.scalajs.js.annotation.JavaDefaultMethod")
+
+    lazy val JSImportNamespaceObject = getRequiredModule("scala.scalajs.js.annotation.JSImport.Namespace")
 
     lazy val JSAnyTpe    = JSAnyClass.toTypeConstructor
     lazy val JSObjectTpe = JSObjectClass.toTypeConstructor
@@ -67,7 +85,7 @@ trait JSDefinitions { self: JSGlobalAddons =>
     lazy val JSFunctionTpes = JSFunctionClasses.map(_.toTypeConstructor)
 
     lazy val JSAnyModule = JSAnyClass.companionModule
-      def JSAny_fromFunction(arity: Int) = getMemberMethod(JSAnyModule, newTermName("fromFunction"+arity))
+      def JSAny_fromFunction(arity: Int): TermSymbol = getMemberMethod(JSAnyModule, newTermName("fromFunction"+arity))
 
     lazy val JSDynamicModule = JSDynamicClass.companionModule
       lazy val JSDynamic_newInstance = getMemberMethod(JSDynamicModule, newTermName("newInstance"))
@@ -83,9 +101,13 @@ trait JSDefinitions { self: JSGlobalAddons =>
       lazy val JSArray_create = getMemberMethod(JSArrayModule, newTermName("apply"))
 
     lazy val JSThisFunctionModule = JSThisFunctionClass.companionModule
-      def JSThisFunction_fromFunction(arity: Int) = getMemberMethod(JSThisFunctionModule, newTermName("fromFunction"+arity))
+      def JSThisFunction_fromFunction(arity: Int): TermSymbol = getMemberMethod(JSThisFunctionModule, newTermName("fromFunction"+arity))
 
-    lazy val RawJSTypeAnnot = getClassIfDefined("scala.scalajs.js.annotation.RawJSType")
+    lazy val JSConstructorTagModule = getRequiredModule("scala.scalajs.js.ConstructorTag")
+      lazy val JSConstructorTag_materialize = getMemberMethod(JSConstructorTagModule, newTermName("materialize"))
+
+    lazy val RawJSTypeAnnot = getRequiredClass("scala.scalajs.js.annotation.RawJSType")
+    lazy val ExposedJSMemberAnnot = getRequiredClass("scala.scalajs.js.annotation.ExposedJSMember")
 
     lazy val RuntimeStringModule = getRequiredModule("scala.scalajs.runtime.RuntimeString")
     lazy val RuntimeStringModuleClass = RuntimeStringModule.moduleClass
@@ -99,18 +121,29 @@ trait JSDefinitions { self: JSGlobalAddons =>
       lazy val Runtime_wrapJavaScriptException    = getMemberMethod(RuntimePackageModule, newTermName("wrapJavaScriptException"))
       lazy val Runtime_unwrapJavaScriptException  = getMemberMethod(RuntimePackageModule, newTermName("unwrapJavaScriptException"))
       lazy val Runtime_genTraversableOnce2jsArray = getMemberMethod(RuntimePackageModule, newTermName("genTraversableOnce2jsArray"))
-      lazy val Runtime_newJSObjectWithVarargs     = getMemberMethod(RuntimePackageModule, newTermName("newJSObjectWithVarargs"))
+      lazy val Runtime_jsTupleArray2jsObject      = getMemberMethod(RuntimePackageModule, newTermName("jsTupleArray2jsObject"))
+      lazy val Runtime_constructorOf              = getMemberMethod(RuntimePackageModule, newTermName("constructorOf"))
+      lazy val Runtime_newConstructorTag          = getMemberMethod(RuntimePackageModule, newTermName("newConstructorTag"))
       lazy val Runtime_propertiesOf               = getMemberMethod(RuntimePackageModule, newTermName("propertiesOf"))
+      lazy val Runtime_linkingInfo                = getMemberMethod(RuntimePackageModule, newTermName("linkingInfo"))
 
     lazy val WrappedArrayClass = getRequiredClass("scala.scalajs.js.WrappedArray")
       lazy val WrappedArray_ctor = WrappedArrayClass.primaryConstructor
 
     // This is a def, since similar symbols (arrayUpdateMethod, etc.) are in runDefinitions
     // (rather than definitions) and we weren't sure if it is safe to make this a lazy val
-    def ScalaRunTime_isArray = getMemberMethod(ScalaRunTimeModule, newTermName("isArray")).suchThat(_.tpe.params.size == 2)
+    def ScalaRunTime_isArray: Symbol = getMemberMethod(ScalaRunTimeModule, newTermName("isArray")).suchThat(_.tpe.params.size == 2)
 
     lazy val BoxesRunTime_boxToCharacter = getMemberMethod(BoxesRunTimeModule, newTermName("boxToCharacter"))
     lazy val BoxesRunTime_unboxToChar    = getMemberMethod(BoxesRunTimeModule, newTermName("unboxToChar"))
 
+    lazy val ReflectModule = getRequiredModule("scala.scalajs.reflect.Reflect")
+      lazy val Reflect_registerLoadableModuleClass = getMemberMethod(ReflectModule, newTermName("registerLoadableModuleClass"))
+      lazy val Reflect_registerInstantiatableClass = getMemberMethod(ReflectModule, newTermName("registerInstantiatableClass"))
+
+    lazy val EnableReflectiveInstantiationAnnotation = getRequiredClass("scala.scalajs.reflect.annotation.EnableReflectiveInstantiation")
+
   }
+
+  // scalastyle:on line.size.limit
 }

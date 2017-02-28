@@ -20,7 +20,11 @@ package scala.scalajs.js
  *
  * MDN
  */
+@native
 class RegExp(pattern: String, flags: String = "") extends Object {
+  /** Creates a new RegExp with the same pattern and flags as the given one. */
+  def this(pattern: RegExp) = this("", "")
+
   /**
    * The source property returns a String containing the text of the pattern,
    * excluding the forward slashes. It is a read-only property of an individual
@@ -98,9 +102,11 @@ class RegExp(pattern: String, flags: String = "") extends Object {
   def test(string: String): Boolean = native
 }
 
+@native
 object RegExp extends Object {
   def apply(pattern: String, flags: String = ""): RegExp = native
 
+  @native
   trait ExecResult extends Array[UndefOr[String]] {
     var index: Int = native
     var input: String = native

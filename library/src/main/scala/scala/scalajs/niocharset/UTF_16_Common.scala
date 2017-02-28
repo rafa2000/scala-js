@@ -16,7 +16,7 @@ import java.nio.charset._
 
 /** This is a very specific common implementation for UTF_16BE and UTF_16LE.
  */
-private[niocharset] abstract class UTF_16_Common protected (
+private[niocharset] abstract class UTF_16_Common protected ( // scalastyle:ignore
     name: String, aliases: Array[String],
     private val endianness: Int) extends Charset(name, aliases) {
 
@@ -128,7 +128,7 @@ private[niocharset] abstract class UTF_16_Common protected (
     def encodeLoop(in: CharBuffer, out: ByteBuffer): CoderResult = {
       if (needToWriteBOM) {
         if (out.remaining < 2) {
-          return CoderResult.OVERFLOW
+          return CoderResult.OVERFLOW // scalastyle:ignore
         } else {
           // Always encode in big endian
           out.put(0xfe.toByte)
@@ -198,7 +198,7 @@ private[niocharset] abstract class UTF_16_Common protected (
   }
 }
 
-private[niocharset] object UTF_16_Common {
+private[niocharset] object UTF_16_Common { // scalastyle:ignore
   final val AutoEndian = 0
   final val BigEndian = 1
   final val LittleEndian = 2

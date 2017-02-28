@@ -45,18 +45,25 @@ class StringBuffer(private var content: String) extends CharSequence
     else append(csq.subSequence(start, end).toString())
   }
 
-  override def toString() = content
+  def appendCodePoint(codePoint: Int): StringBuffer =
+    append(Character.toChars(codePoint))
 
-  def length() = content.length()
+  override def toString(): String = content
 
-  def charAt(index: Int) = content.charAt(index)
-  def codePointAt(index: Int) = content.codePointAt(index)
+  def length(): Int = content.length()
 
-  def indexOf(str: String) = content.indexOf(str)
-  def indexOf(str: String, fromIndex: Int) = content.indexOf(str, fromIndex)
+  def charAt(index: Int): Char = content.charAt(index)
+  def codePointAt(index: Int): Int = content.codePointAt(index)
 
-  def lastIndexOf(str: String) = content.lastIndexOf(str)
-  def lastIndexOf(str: String, fromIndex: Int) = content.lastIndexOf(str, fromIndex)
+  def indexOf(str: String): Int = content.indexOf(str)
+
+  def indexOf(str: String, fromIndex: Int): Int =
+    content.indexOf(str, fromIndex)
+
+  def lastIndexOf(str: String): Int = content.lastIndexOf(str)
+
+  def lastIndexOf(str: String, fromIndex: Int): Int =
+    content.lastIndexOf(str, fromIndex)
 
   def subSequence(start: Int, end: Int): CharSequence = substring(start, end)
   def substring(start: Int): String = content.substring(start)
@@ -74,6 +81,10 @@ class StringBuffer(private var content: String) extends CharSequence
     this
   }
 
+  def ensureCapacity(minimumCapacity: Int): Unit = {
+    // Do nothing
+  }
+
   /**
    * @param start The beginning index, inclusive.
    * @param end The ending index, exclusive.
@@ -82,22 +93,29 @@ class StringBuffer(private var content: String) extends CharSequence
    */
   def replace(start: Int, end: Int, str: String): StringBuffer = {
     val length = content.length
-    if (start < 0 || start > end || start >= length)
-      throw new StringIndexOutOfBoundsException(s"Illegal to replace substring at [$start - $end] in string of length $length")
+    if (start < 0 || start > end || start > length) {
+      throw new StringIndexOutOfBoundsException(
+          s"Illegal to replace substring at [$start - $end] in string of length $length")
+    }
+
     val realEnd = if (end > length) length else end // java api convention
     content = content.substring(0, start) + str + content.substring(realEnd)
     this
   }
 
   def setCharAt(index: Int, ch: scala.Char): Unit = {
-    if (index < 0 || index >= content.length)
-      throw new IndexOutOfBoundsException("String index out of range: " + index)
+    if (index < 0 || index >= content.length) {
+      throw new StringIndexOutOfBoundsException(
+          "String index out of range: " + index)
+    }
     content = content.substring(0, index) + ch + content.substring(index + 1)
   }
 
   def setLength(newLength: Int): Unit = {
-    if (newLength < 0)
-      throw new IndexOutOfBoundsException("String index out of range: " + newLength)
+    if (newLength < 0) {
+      throw new StringIndexOutOfBoundsException(
+          "String index out of range: " + newLength)
+    }
 
     val len = length()
     if (len == newLength) {

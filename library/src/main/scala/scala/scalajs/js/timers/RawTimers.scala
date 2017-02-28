@@ -10,6 +10,7 @@
 package scala.scalajs.js.timers
 
 import scala.scalajs.js
+import js.annotation.JSGlobalScope
 
 /**
  *  <span class="badge badge-non-std" style="float: right;">Non-Standard</span>
@@ -19,11 +20,13 @@ import scala.scalajs.js
  *  general it is more advisable to use the methods directly defined on
  *  [[timers]] as they are more Scala-like.
  */
-object RawTimers extends js.GlobalScope {
+@js.native
+@JSGlobalScope
+object RawTimers extends js.Object {
 
-  /** Schedule [[handler]] for execution in [[interval]] milliseconds.
+  /** Schedule `handler` for execution in `interval` milliseconds.
    *
-   *  @param handler the function to call after [[interval]] has passed
+   *  @param handler the function to call after `interval` has passed
    *  @param interval duration in milliseconds to wait
    *  @return A handle that can be used to cancel the timeout by passing it
    *          to [[clearTimeout]].
@@ -35,10 +38,10 @@ object RawTimers extends js.GlobalScope {
    */
   def clearTimeout(handle: SetTimeoutHandle): Unit = js.native
 
-  /** Schedule [[handler]] for repeated execution every [[interval]]
+  /** Schedule `handler` for repeated execution every `interval`
    *  milliseconds.
    *
-   *  @param handler the function to call after each [[interval]]
+   *  @param handler the function to call after each `interval`
    *  @param interval duration in milliseconds between executions
    *  @return A handle that can be used to cancel the interval by passing it
    *          to [[clearInterval]].

@@ -30,10 +30,6 @@ object Trees {
     }
   }
 
-  case object EmptyTree extends Tree {
-    val pos = NoPosition
-  }
-
   // Comments
 
   case class DocComment(text: String)(implicit val pos: Position) extends Tree
@@ -41,7 +37,6 @@ object Trees {
   // Identifiers and properties
 
   sealed trait PropertyName {
-    def name: String
     def pos: Position
   }
 
@@ -55,14 +50,28 @@ object Trees {
       new Ident(name, Some(name))
   }
 
+  case class ComputedName(tree: Tree) extends PropertyName {
+    def pos = tree.pos
+  }
+
   // Definitions
 
-  case class VarDef(name: Ident, rhs: Tree)(implicit val pos: Position) extends Tree {
+  sealed trait LocalDef extends Tree {
+    def name: Ident
+    def mutable: Boolean
+
     def ref(implicit pos: Position): Tree = VarRef(name)
   }
 
-  case class ParamDef(name: Ident)(implicit val pos: Position) extends Tree {
-    def ref(implicit pos: Position): Tree = VarRef(name)
+  case class VarDef(name: Ident, rhs: Option[Tree])(implicit val pos: Position) extends LocalDef {
+    def mutable: Boolean = true
+  }
+
+  /** ES6 let or const (depending on the mutable flag). */
+  case class Let(name: Ident, mutable: Boolean, rhs: Option[Tree])(implicit val pos: Position) extends LocalDef
+
+  case class ParamDef(name: Ident, rest: Boolean)(implicit val pos: Position) extends LocalDef {
+    def mutable: Boolean = true
   }
 
   // Control flow constructs
@@ -111,7 +120,9 @@ object Trees {
 
   case class DoWhile(body: Tree, cond: Tree, label: Option[Ident] = None)(implicit val pos: Position) extends Tree
 
-  case class Try(block: Tree, errVar: Ident, handler: Tree, finalizer: Tree)(implicit val pos: Position) extends Tree
+  case class TryCatch(block: Tree, errVar: Ident, handler: Tree)(implicit val pos: Position) extends Tree
+
+  case class TryFinally(block: Tree, finalizer: Tree)(implicit val pos: Position) extends Tree
 
   case class Throw(expr: Tree)(implicit val pos: Position) extends Tree
 
@@ -136,6 +147,15 @@ object Trees {
    *  function call otherwise.
    */
   case class Apply(fun: Tree, args: List[Tree])(implicit val pos: Position) extends Tree
+
+  /** `...items`, the "spread" operator of ECMAScript 6.
+   *
+   *  It is only valid in ECMAScript 6, in the `args`/`items` of a [[New]],
+   *  [[Apply]], or [[ArrayConstr]].
+   *
+   *  @param items An iterable whose items will be spread
+   */
+  case class Spread(items: Tree)(implicit val pos: Position) extends Tree
 
   case class Delete(prop: Tree)(implicit val pos: Position) extends Tree {
     require(prop match {
@@ -188,9 +208,7 @@ object Trees {
   case class DoubleLiteral(value: Double)(implicit val pos: Position) extends Literal
 
   case class StringLiteral(value: String)(
-      implicit val pos: Position) extends Literal with PropertyName {
-    override def name = value
-  }
+      implicit val pos: Position) extends Literal with PropertyName
 
   // Atomic expressions
 
@@ -199,4 +217,25 @@ object Trees {
   case class This()(implicit val pos: Position) extends Tree
 
   case class Function(args: List[ParamDef], body: Tree)(implicit val pos: Position) extends Tree
+
+  // Named function definition
+
+  case class FunctionDef(name: Ident, args: List[ParamDef], body: Tree)(
+      implicit val pos: Position) extends Tree
+
+  // ECMAScript 6 classes
+
+  case class ClassDef(className: Option[Ident], parentClass: Option[Tree],
+      members: List[Tree])(implicit val pos: Position) extends Tree
+
+  case class MethodDef(static: Boolean, name: PropertyName, args: List[ParamDef],
+      body: Tree)(implicit val pos: Position) extends Tree
+
+  case class GetterDef(static: Boolean, name: PropertyName,
+      body: Tree)(implicit val pos: Position) extends Tree
+
+  case class SetterDef(static: Boolean, name: PropertyName, param: ParamDef,
+      body: Tree)(implicit val pos: Position) extends Tree
+
+  case class Super()(implicit val pos: Position) extends Tree
 }

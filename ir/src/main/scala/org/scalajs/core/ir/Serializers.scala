@@ -16,6 +16,7 @@ import java.net.URI
 
 import scala.collection.mutable
 
+import Definitions.isConstructorName
 import Position._
 import Trees._
 import Types._
@@ -110,16 +111,13 @@ object Serializers {
       import buffer._
       writePosition(tree.pos)
       tree match {
-        case EmptyTree =>
-          writeByte(TagEmptyTree)
-
         case VarDef(ident, vtpe, mutable, rhs) =>
           writeByte(TagVarDef)
           writeIdent(ident); writeType(vtpe); writeBoolean(mutable); writeTree(rhs)
 
-        case ParamDef(ident, ptpe, mutable) =>
+        case ParamDef(ident, ptpe, mutable, rest) =>
           writeByte(TagParamDef)
-          writeIdent(ident); writeType(ptpe); writeBoolean(mutable)
+          writeIdent(ident); writeType(ptpe); writeBoolean(mutable); writeBoolean(rest)
 
         case Skip() =>
           writeByte(TagSkip)
@@ -153,10 +151,14 @@ object Serializers {
           writeByte(TagDoWhile)
           writeTree(body); writeTree(cond); writeOptIdent(label)
 
-        case Try(block, errVar, handler, finalizer) =>
-          writeByte(TagTry)
-          writeTree(block); writeIdent(errVar); writeTree(handler); writeTree(finalizer)
+        case TryCatch(block, errVar, handler) =>
+          writeByte(TagTryCatch)
+          writeTree(block); writeIdent(errVar); writeTree(handler)
           writeType(tree.tpe)
+
+        case TryFinally(block, finalizer) =>
+          writeByte(TagTryFinally)
+          writeTree(block); writeTree(finalizer)
 
         case Throw(expr) =>
           writeByte(TagThrow)
@@ -194,6 +196,11 @@ object Serializers {
         case Select(qualifier, item) =>
           writeByte(TagSelect)
           writeTree(qualifier); writeIdent(item)
+          writeType(tree.tpe)
+
+        case SelectStatic(cls, item) =>
+          writeByte(TagSelectStatic)
+          writeClassType(cls); writeIdent(item)
           writeType(tree.tpe)
 
         case Apply(receiver, method, args) =>
@@ -285,6 +292,30 @@ object Serializers {
           writeByte(TagJSBracketMethodApply)
           writeTree(receiver); writeTree(method); writeTrees(args)
 
+        case JSSuperBracketSelect(cls, qualifier, item) =>
+          writeByte(TagJSSuperBracketSelect)
+          writeClassType(cls); writeTree(qualifier); writeTree(item)
+
+        case JSSuperBracketCall(cls, receiver, method, args) =>
+          writeByte(TagJSSuperBracketCall)
+          writeClassType(cls); writeTree(receiver); writeTree(method); writeTrees(args)
+
+        case JSSuperConstructorCall(args) =>
+          writeByte(TagJSSuperConstructorCall)
+          writeTrees(args)
+
+        case LoadJSConstructor(cls) =>
+          writeByte(TagLoadJSConstructor)
+          writeClassType(cls)
+
+        case LoadJSModule(cls) =>
+          writeByte(TagLoadJSModule)
+          writeClassType(cls)
+
+        case JSSpread(items) =>
+          writeByte(TagJSSpread)
+          writeTree(items)
+
         case JSDelete(prop) =>
           writeByte(TagJSDelete)
           writeTree(prop)
@@ -308,17 +339,11 @@ object Serializers {
             writePropertyName(field._1); writeTree(field._2)
           }
 
-        case JSEnvInfo() =>
-          writeByte(TagJSEnvInfo)
-
-        // Literals
+        case JSLinkingInfo() =>
+          writeByte(TagJSLinkingInfo)
 
         case Undefined() =>
           writeByte(TagUndefined)
-
-        case UndefinedParam() =>
-          writeByte(TagUndefinedParam)
-          writeType(tree.tpe)
 
         case Null() =>
           writeByte(TagNull)
@@ -351,6 +376,10 @@ object Serializers {
           writeByte(TagClassOf)
           writeReferenceType(cls)
 
+        case UndefinedParam() =>
+          writeByte(TagUndefinedParam)
+          writeType(tree.tpe)
+
         case VarRef(ident) =>
           writeByte(TagVarRef)
           writeIdent(ident)
@@ -368,19 +397,23 @@ object Serializers {
           writeTrees(captureValues)
 
         case tree: ClassDef =>
-          val ClassDef(name, kind, superClass, parents, jsName, defs) = tree
+          val ClassDef(name, kind, superClass, parents, jsNativeLoadSpec,
+              defs) = tree
           writeByte(TagClassDef)
           writeIdent(name)
           writeByte(ClassKind.toByte(kind))
           writeOptIdent(superClass)
           writeIdents(parents)
-          writeString(jsName.getOrElse(""))
+          writeJSNativeLoadSpec(jsNativeLoadSpec)
           writeTrees(defs)
           writeInt(tree.optimizerHints.bits)
 
-        case FieldDef(ident, ftpe, mutable) =>
+        case FieldDef(static, name, ftpe, mutable) =>
           writeByte(TagFieldDef)
-          writeIdent(ident); writeType(ftpe); writeBoolean(mutable)
+          writeBoolean(static)
+          writePropertyName(name)
+          writeType(ftpe)
+          writeBoolean(mutable)
 
         case methodDef: MethodDef =>
           val MethodDef(static, name, args, resultType, body) = methodDef
@@ -394,7 +427,7 @@ object Serializers {
 
           // Write out method def
           writeBoolean(static); writePropertyName(name)
-          writeTrees(args); writeType(resultType); writeTree(body)
+          writeTrees(args); writeType(resultType); writeOptTree(body)
           writeInt(methodDef.optimizerHints.bits)
 
           // Jump back and write true length
@@ -402,17 +435,39 @@ object Serializers {
           writeInt(length)
           bufferUnderlying.continue()
 
-        case PropertyDef(name, getter, arg, setter) =>
+        case PropertyDef(static, name, getter, setterArgAndBody) =>
           writeByte(TagPropertyDef)
-          writePropertyName(name); writeTree(getter); writeTree(arg); writeTree(setter)
+          writeBoolean(static)
+          writePropertyName(name)
+          writeOptTree(getter)
+          writeBoolean(setterArgAndBody.isDefined)
+          setterArgAndBody foreach { case (arg, body) =>
+            writeTree(arg); writeTree(body)
+          }
 
         case ConstructorExportDef(fullName, args, body) =>
           writeByte(TagConstructorExportDef)
           writeString(fullName); writeTrees(args); writeTree(body)
 
+        case JSClassExportDef(fullName) =>
+          writeByte(TagJSClassExportDef)
+          writeString(fullName)
+
         case ModuleExportDef(fullName) =>
           writeByte(TagModuleExportDef)
           writeString(fullName)
+
+        case TopLevelModuleExportDef(fullName) =>
+          writeByte(TagTopLevelModuleExportDef)
+          writeString(fullName)
+
+        case TopLevelMethodExportDef(methodDef) =>
+          writeByte(TagTopLevelMethodExportDef)
+          writeTree(methodDef)
+
+        case TopLevelFieldExportDef(fullName, field) =>
+          writeByte(TagTopLevelFieldExportDef)
+          writeString(fullName); writeIdent(field)
       }
       if (UseDebugMagic)
         writeInt(DebugMagic)
@@ -421,6 +476,15 @@ object Serializers {
     def writeTrees(trees: List[Tree]): Unit = {
       buffer.writeInt(trees.size)
       trees.foreach(writeTree)
+    }
+
+    def writeOptTree(optTree: Option[Tree]): Unit = {
+      optTree.fold {
+        writePosition(Position.NoPosition)
+        buffer.writeByte(TagEmptyTree)
+      } { tree =>
+        writeTree(tree)
+      }
     }
 
     def writeIdent(ident: Ident): Unit = {
@@ -481,13 +545,21 @@ object Serializers {
     }
 
     def writeReferenceType(tpe: ReferenceType): Unit =
-      writeType(tpe)
+      writeType(tpe.asInstanceOf[Type])
 
-    def writePropertyName(name: PropertyName): Unit = {
-      name match {
-        case name: Ident         => buffer.writeBoolean(true); writeIdent(name)
-        case name: StringLiteral => buffer.writeBoolean(false); writeTree(name)
-      }
+    def writePropertyName(name: PropertyName): Unit = name match {
+      case name: Ident =>
+        buffer.writeByte(TagPropertyNameIdent)
+        writeIdent(name)
+
+      case name: StringLiteral =>
+        buffer.writeByte(TagPropertyNameStringLiteral)
+        writeTree(name)
+
+      case ComputedName(tree, index) =>
+        buffer.writeByte(TagPropertyNameComputedName)
+        writeTree(tree)
+        writeString(index)
     }
 
     def writePosition(pos: Position): Unit = {
@@ -534,6 +606,25 @@ object Serializers {
         writeInt(PosDebugMagic)
     }
 
+    def writeJSNativeLoadSpec(jsNativeLoadSpec: Option[JSNativeLoadSpec]): Unit = {
+      import buffer._
+
+      jsNativeLoadSpec.fold {
+        writeByte(TagJSNativeLoadSpecNone)
+      } { spec =>
+        spec match {
+          case JSNativeLoadSpec.Global(path) =>
+            writeByte(TagJSNativeLoadSpecGlobal)
+            writeStrings(path)
+
+          case JSNativeLoadSpec.Import(module, path) =>
+            writeByte(TagJSNativeLoadSpecImport)
+            writeString(module)
+            writeStrings(path)
+        }
+      }
+    }
+
     def writeOptHash(optHash: Option[TreeHash]): Unit = {
       buffer.writeBoolean(optHash.isDefined)
       for (hash <- optHash) {
@@ -544,9 +635,24 @@ object Serializers {
 
     def writeString(s: String): Unit =
       buffer.writeInt(stringToIndex(s))
+
+    def writeStrings(strings: List[String]): Unit = {
+      buffer.writeInt(strings.size)
+      strings.foreach(writeString)
+    }
   }
 
   private final class Deserializer(stream: InputStream, sourceVersion: String) {
+    private[this] val useHacks060 = sourceVersion == "0.6.0"
+    private[this] val useHacks065 =
+      Set("0.6.0", "0.6.3", "0.6.4", "0.6.5").contains(sourceVersion)
+    private[this] val useHacks066 =
+      useHacks065 || sourceVersion == "0.6.6"
+    private[this] val useHacks068 =
+      useHacks066 || sourceVersion == "0.6.8"
+    private[this] val useHacks0614 =
+      useHacks068 || Set("0.6.13", "0.6.14").contains(sourceVersion)
+
     private[this] val input = new DataInputStream(stream)
 
     private[this] val files =
@@ -557,19 +663,35 @@ object Serializers {
 
     private[this] var lastPosition: Position = Position.NoPosition
 
+    private[this] var foundArguments: Boolean = false
+
     def deserialize(): Tree = {
       readTree()
     }
 
     def readTree(): Tree = {
-      import input._
-      implicit val pos = readPosition()
-      val tag = readByte()
-      val result = (tag: @switch) match {
-        case TagEmptyTree => EmptyTree
+      val pos = readPosition()
+      readTreeFromTag(input.readByte())(pos)
+    }
 
-        case TagVarDef     => VarDef(readIdent(), readType(), readBoolean(), readTree())
-        case TagParamDef   => ParamDef(readIdent(), readType(), readBoolean())
+    def readOptTree(): Option[Tree] = {
+      // TODO switch tag and position when we can break binary compat.
+      val pos = readPosition()
+      val tag = input.readByte()
+      if (tag == TagEmptyTree) None
+      else Some(readTreeFromTag(tag)(pos))
+    }
+
+    private def readTreeFromTag(tag: Byte)(implicit pos: Position): Tree = {
+      import input._
+      val result = (tag: @switch) match {
+        case TagEmptyTree =>
+          sys.error("Found invalid TagEmptyTree")
+
+        case TagVarDef   => VarDef(readIdent(), readType(), readBoolean(), readTree())
+        case TagParamDef =>
+          ParamDef(readIdent(), readType(), readBoolean(),
+              rest = if (useHacks060) false else readBoolean())
 
         case TagSkip     => Skip()
         case TagBlock    => Block(readTrees())
@@ -579,7 +701,29 @@ object Serializers {
         case TagIf       => If(readTree(), readTree(), readTree())(readType())
         case TagWhile    => While(readTree(), readTree(), readOptIdent())
         case TagDoWhile  => DoWhile(readTree(), readTree(), readOptIdent())
-        case TagTry      => Try(readTree(), readIdent(), readTree(), readTree())(readType())
+
+        case TagTry =>
+          if (!useHacks068) {
+            sys.error("Invalid tag TagTry")
+          }
+
+          val block = readTree()
+          val errVar = readIdent()
+          val handler = readOptTree()
+          val finalizer = readOptTree()
+          val tpe = readType()
+
+          val maybeCatch = handler.fold(block)(
+              handler => TryCatch(block, errVar, handler)(tpe))
+          finalizer.fold(maybeCatch)(
+              finalizer => TryFinally(maybeCatch, finalizer))
+
+        case TagTryCatch =>
+          TryCatch(readTree(), readIdent(), readTree())(readType())
+
+        case TagTryFinally =>
+          TryFinally(readTree(), readTree())
+
         case TagThrow    => Throw(readTree())
         case TagContinue => Continue(readOptIdent())
         case TagMatch    =>
@@ -592,8 +736,15 @@ object Serializers {
         case TagLoadModule      => LoadModule(readClassType())
         case TagStoreModule     => StoreModule(readClassType(), readTree())
         case TagSelect          => Select(readTree(), readIdent())(readType())
+        case TagSelectStatic    => SelectStatic(readClassType(), readIdent())(readType())
         case TagApply           => Apply(readTree(), readIdent(), readTrees())(readType())
-        case TagApplyStatically => ApplyStatically(readTree(), readClassType(), readIdent(), readTrees())(readType())
+        case TagApplyStatically =>
+          val result1 =
+            ApplyStatically(readTree(), readClassType(), readIdent(), readTrees())(readType())
+          if (useHacks065 && result1.tpe != NoType && isConstructorName(result1.method.name))
+            result1.copy()(NoType)
+          else
+            result1
         case TagApplyStatic     => ApplyStatic(readClassType(), readIdent(), readTrees())(readType())
         case TagUnaryOp         => UnaryOp(readByte(), readTree())
         case TagBinaryOp        => BinaryOp(readByte(), readTree(), readTree())
@@ -614,16 +765,28 @@ object Serializers {
         case TagJSFunctionApply      => JSFunctionApply(readTree(), readTrees())
         case TagJSDotMethodApply     => JSDotMethodApply(readTree(), readIdent(), readTrees())
         case TagJSBracketMethodApply => JSBracketMethodApply(readTree(), readTree(), readTrees())
+        case TagJSSuperBracketSelect => JSSuperBracketSelect(readClassType(), readTree(), readTree())
+        case TagJSSuperBracketCall   =>
+          JSSuperBracketCall(readClassType(), readTree(), readTree(), readTrees())
+        case TagJSSuperConstructorCall => JSSuperConstructorCall(readTrees())
+        case TagLoadJSConstructor    => LoadJSConstructor(readClassType())
+        case TagLoadJSModule         => LoadJSModule(readClassType())
+        case TagJSSpread             => JSSpread(readTree())
         case TagJSDelete             => JSDelete(readTree())
         case TagJSUnaryOp            => JSUnaryOp(readInt(), readTree())
         case TagJSBinaryOp           => JSBinaryOp(readInt(), readTree(), readTree())
         case TagJSArrayConstr        => JSArrayConstr(readTrees())
         case TagJSObjectConstr       =>
           JSObjectConstr(List.fill(readInt())((readPropertyName(), readTree())))
-        case TagJSEnvInfo            => JSEnvInfo()
+        case TagJSLinkingInfo        => JSLinkingInfo()
+
+        case TagJSEnvInfo =>
+          if (useHacks066)
+            JSBracketSelect(JSLinkingInfo(), StringLiteral("envInfo"))
+          else
+            throw new MatchError(tag)
 
         case TagUndefined      => Undefined()
-        case TagUndefinedParam => UndefinedParam()(readType())
         case TagNull           => Null()
         case TagBooleanLiteral => BooleanLiteral(readBoolean())
         case TagIntLiteral     => IntLiteral(readInt())
@@ -633,39 +796,113 @@ object Serializers {
         case TagStringLiteral  => StringLiteral(readString())
         case TagClassOf        => ClassOf(readReferenceType())
 
-        case TagVarRef  => VarRef(readIdent())(readType())
+        case TagUndefinedParam => UndefinedParam()(readType())
+
+        case TagVarRef =>
+          val result = VarRef(readIdent())(readType())
+          if (useHacks060 && result.ident.name == "arguments")
+            foundArguments = true
+          result
+
         case TagThis    => This()(readType())
         case TagClosure =>
           Closure(readParamDefs(), readParamDefs(), readTree(), readTrees())
 
         case TagClassDef =>
           val name = readIdent()
-          val kind = ClassKind.fromByte(readByte())
+          val kind0 = ClassKind.fromByte(readByte())
           val superClass = readOptIdent()
           val parents = readIdents()
-          val jsName = Some(readString()).filter(_ != "")
-          val defs = readTrees()
+          val jsNativeLoadSpec = readJSNativeLoadSpec()
+          val defs0 = readTrees()
+          val defs = if (useHacks065) {
+            defs0.filter {
+              case MethodDef(_, Ident(name, _), _, _, _) =>
+                !Definitions.isReflProxyName(name)
+              case _ =>
+                true
+            }
+          } else {
+            defs0
+          }
           val optimizerHints = new OptimizerHints(readInt())
-          ClassDef(name, kind, superClass, parents, jsName, defs)(optimizerHints)
+
+          val kind = {
+            if (useHacks068 && kind0 == ClassKind.AbstractJSType &&
+                jsNativeLoadSpec.isDefined) {
+              ClassKind.NativeJSClass
+            } else {
+              kind0
+            }
+          }
+
+          ClassDef(name, kind, superClass, parents, jsNativeLoadSpec, defs)(
+              optimizerHints)
 
         case TagFieldDef =>
-          FieldDef(readIdent(), readType(), readBoolean())
+          if (useHacks0614)
+            FieldDef(static = false, readIdent(), readType(), readBoolean())
+          else
+            FieldDef(readBoolean(), readPropertyName(), readType(), readBoolean())
+
+        case TagStringLitFieldDef if useHacks0614 =>
+          FieldDef(static = false, readTree().asInstanceOf[StringLiteral],
+              readType(), readBoolean())
 
         case TagMethodDef =>
           val optHash = readOptHash()
           // read and discard the length
           val len = readInt()
           assert(len >= 0)
-          MethodDef(readBoolean(), readPropertyName(),
-              readParamDefs(), readType(), readTree())(
+          val result1 = MethodDef(readBoolean(), readPropertyName(),
+              readParamDefs(), readType(), readOptTree())(
               new OptimizerHints(readInt()), optHash)
+          val result2 = if (foundArguments) {
+            foundArguments = false
+            new RewriteArgumentsTransformer().transformMethodDef(result1)
+          } else {
+            result1
+          }
+          if (useHacks065 && result2.resultType != NoType &&
+              isConstructorName(result2.name.encodedName)) {
+            result2.copy(resultType = NoType, body = result2.body)(
+                result2.optimizerHints, result2.hash)(
+                result2.pos)
+          } else {
+            result2
+          }
+
         case TagPropertyDef =>
-          PropertyDef(readPropertyName(), readTree(),
-              readTree().asInstanceOf[ParamDef], readTree())
+          val static =
+            if (useHacks0614) false
+            else readBoolean()
+          val name = readPropertyName()
+          val getterBody = readOptTree()
+          val setterArgAndBody = if (useHacks068) {
+            val setterArg = readTree().asInstanceOf[ParamDef]
+            readOptTree().map(setterBody => (setterArg, setterBody))
+          } else {
+            if (readBoolean())
+              Some((readTree().asInstanceOf[ParamDef], readTree()))
+            else
+              None
+          }
+          PropertyDef(static, name, getterBody, setterArgAndBody)
+
         case TagConstructorExportDef =>
-          ConstructorExportDef(readString(), readParamDefs(), readTree())
-        case TagModuleExportDef =>
-          ModuleExportDef(readString())
+          val result = ConstructorExportDef(readString(), readParamDefs(), readTree())
+          if (foundArguments) {
+            foundArguments = false
+            new RewriteArgumentsTransformer().transformConstructorExportDef(result)
+          } else {
+            result
+          }
+
+        case TagJSClassExportDef        => JSClassExportDef(readString())
+        case TagModuleExportDef         => ModuleExportDef(readString())
+        case TagTopLevelModuleExportDef => TopLevelModuleExportDef(readString())
+        case TagTopLevelMethodExportDef => TopLevelMethodExportDef(readTree().asInstanceOf[MethodDef])
+        case TagTopLevelFieldExportDef  => TopLevelFieldExportDef(readString(), readIdent())
       }
       if (UseDebugMagic) {
         val magic = readInt()
@@ -737,8 +974,21 @@ object Serializers {
       readType().asInstanceOf[ReferenceType]
 
     def readPropertyName(): PropertyName = {
-      if (input.readBoolean()) readIdent()
-      else readTree().asInstanceOf[StringLiteral]
+      if (useHacks0614) {
+        if (input.readBoolean()) readIdent()
+        else readTree().asInstanceOf[StringLiteral]
+      } else {
+        input.readByte() match {
+          case TagPropertyNameIdent =>
+            readIdent()
+
+          case TagPropertyNameStringLiteral =>
+            readTree().asInstanceOf[StringLiteral]
+
+          case TagPropertyNameComputedName =>
+            ComputedName(readTree(), readString())
+        }
+      }
     }
 
     def readPosition(): Position = {
@@ -789,6 +1039,23 @@ object Serializers {
       result
     }
 
+    def readJSNativeLoadSpec(): Option[JSNativeLoadSpec] = {
+      if (useHacks068) {
+        Some(readString()).filter(_ != "").map { jsFullName =>
+          JSNativeLoadSpec.Global(jsFullName.split("\\.").toList)
+        }
+      } else {
+        (input.readByte(): @switch) match {
+          case TagJSNativeLoadSpecNone =>
+            None
+          case TagJSNativeLoadSpecGlobal =>
+            Some(JSNativeLoadSpec.Global(readStrings()))
+          case TagJSNativeLoadSpecImport =>
+            Some(JSNativeLoadSpec.Import(readString(), readStrings()))
+        }
+      }
+    }
+
     def readOptHash(): Option[TreeHash] = {
       if (input.readBoolean()) {
         val treeHash = new Array[Byte](20)
@@ -802,5 +1069,62 @@ object Serializers {
     def readString(): String = {
       strings(input.readInt())
     }
+
+    def readStrings(): List[String] =
+      List.fill(input.readInt())(readString())
+  }
+
+  private class RewriteArgumentsTransformer extends Transformers.Transformer {
+    import RewriteArgumentsTransformer._
+
+    private[this] var paramToIndex: Map[String, Int] = _
+
+    def transformMethodDef(tree: MethodDef): MethodDef = {
+      /* Ideally, we would re-hash the new MethodDef here, but we cannot do
+       * that because it prevents the JS version of the tools to link.
+       * Since the hashes of exported methods are not used by our pipeline
+       * anyway, we simply put None.
+       */
+      val MethodDef(static, name, args, resultType, body) = tree
+      setupParamToIndex(args)
+      MethodDef(static, name, List(argumentsParamDef(tree.pos)),
+          resultType, body.map(transform(_, isStat = resultType == NoType)))(
+          tree.optimizerHints, None)(tree.pos)
+    }
+
+    def transformConstructorExportDef(
+        tree: ConstructorExportDef): ConstructorExportDef = {
+      val ConstructorExportDef(name, args, body) = tree
+      setupParamToIndex(args)
+      ConstructorExportDef(name, List(argumentsParamDef(tree.pos)),
+          transformStat(body))(tree.pos)
+    }
+
+    private def setupParamToIndex(params: List[ParamDef]): Unit =
+      paramToIndex = params.map(_.name.name).zipWithIndex.toMap
+
+    private def argumentsParamDef(implicit pos: Position): ParamDef =
+      ParamDef(Ident(ArgumentsName), AnyType, mutable = false, rest = true)
+
+    private def argumentsRef(implicit pos: Position): VarRef =
+      VarRef(Ident(ArgumentsName))(AnyType)
+
+    override def transform(tree: Tree, isStat: Boolean): Tree = tree match {
+      case VarRef(Ident(name, origName)) =>
+        implicit val pos = tree.pos
+        paramToIndex.get(name).fold {
+          if (name == "arguments") argumentsRef
+          else tree
+        } { paramIndex =>
+          JSBracketSelect(argumentsRef, IntLiteral(paramIndex))
+        }
+
+      case _ =>
+        super.transform(tree, isStat)
+    }
+  }
+
+  private object RewriteArgumentsTransformer {
+    private final val ArgumentsName = "$arguments"
   }
 }

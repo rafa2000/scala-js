@@ -2,11 +2,13 @@ package java.lang
 
 import scala.scalajs.js
 
+@js.native
 private trait ScalaJSClassData[A] extends js.Object {
   val name: String = js.native
   val isPrimitive: scala.Boolean = js.native
   val isInterface: scala.Boolean = js.native
   val isArrayClass: scala.Boolean = js.native
+  val isRawJSType: scala.Boolean = js.native
 
   def isInstance(obj: Object): scala.Boolean = js.native
   def getFakeInstance(): Object = js.native
@@ -62,6 +64,9 @@ final class Class[A] private (data: ScalaJSClassData[A]) extends Object {
   def isPrimitive(): scala.Boolean =
     data.isPrimitive
 
+  private def isRawJSType(): scala.Boolean =
+    data.isRawJSType
+
   def getName(): String =
     data.name
 
@@ -73,6 +78,15 @@ final class Class[A] private (data: ScalaJSClassData[A]) extends Object {
 
   def getComponentType(): Class[_] =
     data.getComponentType()
+
+  @inline // optimize for the Unchecked case, where this becomes identity()
+  def cast(obj: Object): A = {
+    scala.scalajs.runtime.SemanticsUtils.asInstanceOfCheck(
+        (this eq classOf[Nothing]) ||
+        (obj != null && !isRawJSType && !isInstance(obj)),
+        new ClassCastException(obj + " is not an instance of " + getName))
+    obj.asInstanceOf[A]
+  }
 
   // java.lang.reflect.Array support
 

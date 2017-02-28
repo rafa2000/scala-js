@@ -16,18 +16,40 @@ object StackTrace {
    * errors, which would be very bad if it happened.
    */
 
+  import Implicits._
+
+  /** Returns the current stack trace.
+   *  If the stack trace cannot be analyzed in meaningful way (because we don't
+   *  know the browser), an empty array is returned.
+   */
+  def getCurrentStackTrace(): Array[StackTraceElement] =
+    extract(createException().asInstanceOf[js.Dynamic])
+
   /** Captures browser-specific state recording the current stack trace.
    *  The state is stored as a magic field of the throwable, and will be used
    *  by `extract()` to create an Array[StackTraceElement].
    */
-  def captureState(throwable: Throwable): Unit = {
-    captureState(throwable, createException())
+  @inline def captureState(throwable: Throwable): Unit = {
+    if (js.isUndefined(js.constructorOf[js.Error].captureStackTrace)) {
+      captureState(throwable, createException())
+    } else {
+      /* V8-specific.
+       * The Error.captureStackTrace(e) method records the current stack trace
+       * on `e` as would do `new Error()`, thereby turning `e` into a proper
+       * exception. This avoids creating a dummy exception, but is mostly
+       * important so that Node.js will show stack traces if the exception
+       * is never caught and reaches the global event queue.
+       */
+      js.constructorOf[js.Error].captureStackTrace(throwable.asInstanceOf[js.Any])
+      captureState(throwable, throwable)
+    }
   }
 
   /** Creates a JS Error with the current stack trace state. */
-  private def createException(): Any = {
+  @inline private def createException(): Any = {
     try {
-      this.asInstanceOf[js.Dynamic].undef() // it does not exist, that's the point
+      // Intentionally throw a JavaScript error
+      new js.Object().asInstanceOf[js.Dynamic].undef()
     } catch {
       case js.JavaScriptException(e) => e
     }
@@ -37,9 +59,8 @@ object StackTrace {
    *  The state is stored as a magic field of the throwable, and will be used
    *  by `extract()` to create an Array[StackTraceElement].
    */
-  def captureState(throwable: Throwable, e: Any): Unit = {
+  @inline def captureState(throwable: Throwable, e: Any): Unit =
     throwable.asInstanceOf[js.Dynamic].stackdata = e.asInstanceOf[js.Any]
-  }
 
   /** Tests whether we're running under Rhino. */
   private lazy val isRhino: Boolean = {
@@ -121,12 +142,7 @@ object StackTrace {
       val jsSte = mappedTrace(i)
       val ste = new StackTraceElement(jsSte.declaringClass, jsSte.methodName,
           jsSte.fileName, jsSte.lineNumber)
-
-      jsSte.columnNumber foreach { cn =>
-        // Store column in magic field
-        ste.asInstanceOf[js.Dynamic].columnNumber = cn
-      }
-
+      jsSte.columnNumber.foreach(ste.setColumnNumber)
       result(i) = ste
       i += 1
     }
@@ -135,25 +151,37 @@ object StackTrace {
   }
 
   /** Tries and extract the class name and method from the JS function name.
+   *
    *  The recognized patterns are
+   *  {{{
+   *    \$c_<encoded class name>.prototype.<encoded method name>
+   *    \$c_<encoded class name>.<encoded method name>
+   *    \$s_<encoded class name>__<encoded method name>
+   *    \$m_<encoded module name>
+   *  }}}
+   *  and their ECMAScript51Global equivalents:
+   *  {{{
    *    ScalaJS.c.<encoded class name>.prototype.<encoded method name>
    *    ScalaJS.c.<encoded class name>.<encoded method name>
-   *    ScalaJS.i.<encoded trait impl name>__<encoded method name>
+   *    ScalaJS.s.<encoded class name>__<encoded method name>
    *    ScalaJS.m.<encoded module name>
+   *  }}}
+   *  all of them optionally prefixed by `Object.` or `[object Object].`.
+   *
    *  When the function name is none of those, the pair
-   *    ("<jscode>", functionName)
-   *  is returned, which will instruct StackTraceElement.toString() to only
+   *    `("<jscode>", functionName)`
+   *  is returned, which will instruct [[StackTraceElement.toString()]] to only
    *  display the function name.
    */
   private def extractClassMethod(functionName: String): (String, String) = {
-    val PatC = """^ScalaJS\.c\.([^\.]+)(?:\.prototype)?\.([^\.]+)$""".re
-    val PatI = """^(?:Object\.)?ScalaJS\.i\.((?:_[^_]|[^_])+)__([^\.]+)$""".re
-    val PatM = """^(?:Object\.)?ScalaJS\.m\.([^.\.]+)$""".re
+    val PatC = """^(?:Object\.|\[object Object\]\.)?(?:ScalaJS\.c\.|\$c_)([^\.]+)(?:\.prototype)?\.([^\.]+)$""".re
+    val PatS = """^(?:Object\.|\[object Object\]\.)?(?:ScalaJS\.(?:s|f)\.|\$(?:s|f)_)((?:_[^_]|[^_])+)__([^\.]+)$""".re
+    val PatM = """^(?:Object\.|\[object Object\]\.)?(?:ScalaJS\.m\.|\$m_)([^\.]+)$""".re
 
     var isModule = false
     var mtch = PatC.exec(functionName)
     if (mtch eq null) {
-      mtch = PatI.exec(functionName)
+      mtch = PatS.exec(functionName)
       if (mtch eq null) {
         mtch = PatM.exec(functionName)
         isModule = true
@@ -161,7 +189,7 @@ object StackTrace {
     }
 
     if (mtch ne null) {
-      val className = decodeClassName(mtch(1).get + (if (isModule) "$" else ""))
+      val className = decodeClassName(mtch(1).get)
       val methodName = if (isModule)
         "<clinit>" // that's how it would be reported on the JVM
       else
@@ -202,7 +230,7 @@ object StackTrace {
     base.replace("_", ".").replace("$und", "_")
   }
 
-  private val decompressedClasses: js.Dictionary[String] = {
+  private lazy val decompressedClasses: js.Dictionary[String] = {
     val dict = js.Dynamic.literal(
         O = "java_lang_Object",
         T = "java_lang_String",
@@ -228,7 +256,7 @@ object StackTrace {
     dict
   }
 
-  private val decompressedPrefixes = js.Dynamic.literal(
+  private lazy val decompressedPrefixes = js.Dynamic.literal(
       sjsr_ = "scala_scalajs_runtime_",
       sjs_  = "scala_scalajs_",
       sci_  = "scala_collection_immutable_",
@@ -241,7 +269,7 @@ object StackTrace {
       ju_   = "java_util_"
   ).asInstanceOf[js.Dictionary[String]]
 
-  private val compressedPrefixes =
+  private lazy val compressedPrefixes =
     js.Object.keys(decompressedPrefixes.asInstanceOf[js.Object])
 
   // end of decodeClassName ----------------------------------------------------
@@ -481,6 +509,7 @@ object StackTrace {
    * ---------------------------------------------------------------------------
    */
 
+  @js.native
   trait JSStackTraceElem extends js.Object {
     var declaringClass: String = js.native
     var methodName: String = js.native
@@ -509,10 +538,25 @@ object StackTrace {
   /**
    *  Implicit class to access magic column element created in STE
    */
+  @deprecated("Use Implicits.StackTraceElementOps instead.", "0.6.3")
   implicit class ColumnStackTraceElement(ste: StackTraceElement) {
-    def getColumnNumber: Int = {
-      ste.asInstanceOf[js.Dynamic].columnNumber
-        .asInstanceOf[js.UndefOr[Int]].getOrElse(-1)
+    def getColumnNumber: Int =
+      new Implicits.StackTraceElementOps(ste).getColumnNumber()
+  }
+
+  object Implicits {
+    /** Access to the additional methods `getColumnNumber` and `setColumnNumber`
+     *  of [[java.lang.StackTraceElement StackTraceElement]].
+     */
+    implicit class StackTraceElementOps(
+        val ste: StackTraceElement) extends AnyVal {
+      @inline
+      def getColumnNumber(): Int =
+        ste.asInstanceOf[js.Dynamic].getColumnNumber().asInstanceOf[Int]
+
+      @inline
+      def setColumnNumber(columnNumber: Int): Unit =
+        ste.asInstanceOf[js.Dynamic].setColumnNumber(columnNumber)
     }
   }
 

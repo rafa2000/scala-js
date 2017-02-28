@@ -2,13 +2,19 @@ package java.net
 
 import scala.scalajs.js.RegExp
 import scala.scalajs.js
-import scala.scalajs.js.URIUtils.{decodeURIComponent => decode}
+
+import scala.scalajs.niocharset.StandardCharsets
 
 import scala.annotation.tailrec
+
+import java.nio._
+import java.nio.charset.CodingErrorAction
 
 final class URI(origStr: String) extends Serializable with Comparable[URI] {
 
   import URI.Fields._
+  import URI.decodeComponent
+  import URI.quoteNonASCII
 
   /** The fields matched in the regular expression.
    *
@@ -35,19 +41,19 @@ final class URI(origStr: String) extends Serializable with Comparable[URI] {
     else fld(AbsHierPart)
   }.get
 
-  private val _authority = fld(AbsAuthority, RelAuthority)
+  private val _authority = fld(AbsAuthority, RelAuthority).filter(_ != "")
   private val _userInfo = fld(AbsUserInfo, RelUserInfo)
   private val _host = fld(AbsHost, RelHost)
   private val _port = fld(AbsPort, RelPort).fold(-1)(_.toInt)
 
   private val _path = {
-    if (_isAbsolute) {
-      if (_authority.isDefined) fld(AbsNetPath)
-      else fld(AbsAbsPath)
-    } else {
-      if (_authority.isDefined) fld(RelNetPath)
-      else fld(RelAbsPath) orElse fld(RelRelPath)
-    }
+    val useNetPath = fld(AbsAuthority, RelAuthority).isDefined
+    if (useNetPath)
+      fld(AbsNetPath, RelNetPath) orElse ""
+    else if (_isAbsolute)
+      fld(AbsAbsPath)
+    else
+      fld(RelAbsPath) orElse fld(RelRelPath)
   }
 
   private val _query = fld(AbsQuery, RelQuery)
@@ -129,12 +135,12 @@ final class URI(origStr: String) extends Serializable with Comparable[URI] {
     case _ => false
   }
 
-  def getAuthority(): String = _authority.map(decode).orNull
-  def getFragment(): String = _fragment.map(decode).orNull
+  def getAuthority(): String = _authority.map(decodeComponent).orNull
+  def getFragment(): String = _fragment.map(decodeComponent).orNull
   def getHost(): String = _host.orNull
-  def getPath(): String = _path.map(decode).orNull
+  def getPath(): String = _path.map(decodeComponent).orNull
   def getPort(): Int = _port
-  def getQuery(): String = _query.map(decode).orNull
+  def getQuery(): String = _query.map(decodeComponent).orNull
   def getRawAuthority(): String = _authority.orNull
   def getRawFragment(): String = _fragment.orNull
   def getRawPath(): String = _path.orNull
@@ -142,8 +148,8 @@ final class URI(origStr: String) extends Serializable with Comparable[URI] {
   def getRawSchemeSpecificPart(): String = _schemeSpecificPart
   def getRawUserInfo(): String = _userInfo.orNull
   def getScheme(): String = _scheme.orNull
-  def getSchemeSpecificPart(): String = decode(_schemeSpecificPart)
-  def getUserInfo(): String = _userInfo.map(decode).orNull
+  def getSchemeSpecificPart(): String = decodeComponent(_schemeSpecificPart)
+  def getUserInfo(): String = _userInfo.map(decodeComponent).orNull
 
   override def hashCode(): Int = {
     import scala.util.hashing.MurmurHash3._
@@ -299,7 +305,8 @@ final class URI(origStr: String) extends Serializable with Comparable[URI] {
     }
   }
 
-  def toASCIIString(): String = origStr // We allow only ASCII in URIs.
+  def toASCIIString(): String = quoteNonASCII(origStr)
+
   override def toString(): String = origStr
 
   // Not implemented:
@@ -345,6 +352,8 @@ object URI {
     "::"+lelem+"{1,5}"+ipv4+               // ::2:3:4:5:10.0.0.1    ::5:10.0.0.1         ::10.0.0.1
     ")(?:%[0-9a-z]+)?"
 
+    // scalastyle:off line.size.limit
+
     // This was part of the original regex, but is too specific to
     // IPv6 details.
     // fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|     # fe80::7:8%eth0   fe80::7:8%1     (link-local IPv6 addresses with zone index)
@@ -354,6 +363,8 @@ object URI {
     // ([0-9a-fA-F]{1,4}:){1,4}:
     // ((25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]).){3,3}
     // (25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])           # 2001:db8:3:4::192.0.2.33  64:ff9b::192.0.2.33 (IPv4-Embedded IPv6 Address)
+
+    // scalastyle:on line.size.limit
   }
 
   private val ipv6Re = new RegExp("^"+ipv6address+"$", "i")
@@ -380,12 +391,18 @@ object URI {
     // escaped       = "%" hex hex
     val escaped = "%[a-f0-9]{2}"
 
-    // uric          = reserved | unreserved | escaped
-    val uric = "(?:[;/?:@&=+$,\\[\\]a-z0-9-_.!~*'()]|"+escaped+")"
+    // other         = anything but: ASCII + control chars + no-break-space
+    //                 SPACE_SEPARATOR + LINE_SEPARATOR + PARAGRAPH_SEPARATOR
+    // any use of this category is in deviation to RFC 2396, which is ASCII only
+    val other =
+      "[^\u0000-\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\u2028\u2029]"
 
-    // pchar         = unreserved | escaped |
+    // uric          = reserved | unreserved | escaped | other
+    val uric = "(?:[;/?:@&=+$,\\[\\]a-z0-9-_.!~*'()]|"+escaped+"|"+other+")"
+
+    // pchar         = unreserved | escaped | other |
     //                 ":" | "@" | "&" | "=" | "+" | "$" | ","
-    val pchar = "(?:[a-z0-9-_.!~*'():@&=+$,]|"+escaped+")"
+    val pchar = "(?:[a-z0-9-_.!~*'():@&=+$,]|"+escaped+"|"+other+")"
 
     ///////////////////
     ////  Server   ////
@@ -413,9 +430,9 @@ object URI {
     // hostport      = host [ ":" port ]
     val hostport = host+"(?::([0-9]*))?" /*CAPT*/
 
-    // userinfo      = *( unreserved | escaped |
+    // userinfo      = *( unreserved | escaped | other |
     //                    ";" | ":" | "&" | "=" | "+" | "$" | "," )
-    val userinfo = "(?:[a-z0-9-_.!~*'();:&=+$,]|"+escaped+")*"
+    val userinfo = "(?:[a-z0-9-_.!~*'();:&=+$,]|"+escaped+"|"+other+")*"
 
     // server        = [ [ userinfo "@" ] hostport ]
     val server = "(?:(?:("+userinfo+")@)?"+hostport+")?" /*CAPT*/
@@ -424,9 +441,9 @@ object URI {
     //// Authority ////
     ///////////////////
 
-    // reg_name      = 1*( unreserved | escaped | "$" | "," |
+    // reg_name      = 1*( unreserved | escaped | other | "$" | "," |
     //                     ";" | ":" | "@" | "&" | "=" | "+" )
-    val reg_name = "(?:[a-z0-9-_.!~*'()$,;:@&=+]|"+escaped+")+"
+    val reg_name = "(?:[a-z0-9-_.!~*'()$,;:@&=+]|"+escaped+"|"+other+")+"
 
     // authority     = server | reg_name
     val authority = server+"|"+reg_name
@@ -493,8 +510,8 @@ object URI {
     val absoluteURI = scheme+":(?:("+hier_part+")|("+opaque_part+"))" /*2CAPT*/
 
     // relativeURI   = ( net_path | abs_path | rel_path ) [ "?" query ]
-    val relativeURI = /*2CAPT*/
-      "(?:"+net_path+"|("+abs_path+")|("+rel_path+"))(?:\\?"+query+")?"
+    val relativeURI = /*3CAPT*/
+      "((?:"+net_path+"|("+abs_path+")|("+rel_path+"))(?:\\?"+query+")?)"
 
     // URI-reference = [ absoluteURI | relativeURI ] [ "#" fragment ]
     val uriRef = "^(?:"+absoluteURI+"|"+relativeURI+")(?:#"+fragment+")?$"
@@ -513,8 +530,8 @@ object URI {
     final val AbsAbsPath = AbsNetPath+1
     final val AbsQuery = AbsAbsPath+1
     final val AbsOpaquePart = AbsQuery+1
-    final val RelSchemeSpecificPart = 0 // It's the whole string
-    final val RelAuthority = AbsOpaquePart+1
+    final val RelSchemeSpecificPart = AbsOpaquePart+1 // Everything but the fragment
+    final val RelAuthority = RelSchemeSpecificPart+1
     final val RelUserInfo = RelAuthority+1
     final val RelHost = RelUserInfo+1
     final val RelPort = RelHost+1
@@ -601,39 +618,100 @@ object URI {
 
   // Quote helpers
 
-  private val quoteChar: js.Function1[String, String] = { (str: String) =>
-    require(str.length == 1)
+  private def decodeComponent(str: String): String = {
+    // Fast-track, if no encoded components
+    if (str.forall(_ != '%')) str
+    else {
+      val inBuf = CharBuffer.wrap(str)
+      val outBuf = CharBuffer.allocate(inBuf.capacity)
+      val byteBuf = ByteBuffer.allocate(64)
+      var decoding = false
+      val decoder = StandardCharsets.UTF_8.newDecoder
+        .onMalformedInput(CodingErrorAction.REPLACE)
+        .onUnmappableCharacter(CodingErrorAction.REPLACE)
 
-    val c = str.head.toInt
+      def decode(endOfInput: Boolean) = {
+        byteBuf.flip()
+        decoder.decode(byteBuf, outBuf, endOfInput)
+        if (endOfInput) {
+          decoder.reset()
+          byteBuf.clear()
+          decoding = false
+        } else {
+          byteBuf.compact()
+        }
+      }
 
-    if (c > 127)
-      throw new URISyntaxException(null, "Only ASCII allowed in URIs")
-    else
-      f"%%$c%02x"
+      while (inBuf.hasRemaining) {
+        inBuf.get() match {
+          case '%' =>
+            if (!byteBuf.hasRemaining)
+              decode(false)
+
+            // get two chars - they must exist, otherwise the URI would not have
+            // passed syntax checking
+            val hexStr = inBuf.get().toString + inBuf.get().toString
+            val v = Integer.parseInt(hexStr, 16)
+            byteBuf.put(v.toByte)
+            decoding = true
+
+          case c =>
+            if (decoding)
+              decode(true)
+            outBuf.put(c)
+        }
+      }
+
+      if (decoding)
+        decode(true)
+
+      outBuf.flip()
+      outBuf.toString
+    }
+  }
+
+  private val quoteStr: js.Function1[String, String] = { (str: String) =>
+    val buf = StandardCharsets.UTF_8.encode(str)
+
+    var res = ""
+    while (buf.hasRemaining) {
+      val c = buf.get & 0xff
+      res += (if (c <= 0xf) "%0" else "%") + Integer.toHexString(c).toUpperCase
+    }
+
+    res
   }
 
   /** matches any character not in unreserved, punct, escaped or other */
-  private val userInfoQuoteRe =
-    new RegExp("[^a-z0-9-_.!~*'(),;:$&+=%\\s]|%(?![0-9a-f]{2})", "ig")
+  private val userInfoQuoteRe = new RegExp(
+    // !other = [\u0000-\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\u2028\u2029]
+    // Char class is: [:!other:^a-z0-9-_.!~*'(),;:$&+=%]
+    "[\u0000- \"#/<>?@\\[-\\^`{-}" +
+    "\u007f-\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\u2028\u2029]|" +
+    "%(?![0-9a-f]{2})", "ig")
 
   /** Quote any character not in unreserved, punct, escaped or other */
   private def quoteUserInfo(str: String) = {
     import js.JSStringOps._
-    str.jsReplace(userInfoQuoteRe, quoteChar)
+    str.jsReplace(userInfoQuoteRe, quoteStr)
   }
 
   /** matches any character not in unreserved, punct, escaped, other or equal
    *  to '/' or '@'
    */
-  private val pathQuoteRe =
-    new RegExp("[^a-z0-9-_.!~*'(),;:$&+=%\\s@/]|%(?![0-9a-f]{2})", "ig")
+  private val pathQuoteRe = new RegExp(
+    // !other = [\u0000-\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\u2028\u2029]
+    // Char class is: [:!other:^a-z0-9-_.!~*'(),;:$&+=%@/]
+    "[\u0000- \"#<>?\\[-\\^`{-}" +
+    "\u007f-\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\u2028\u2029]|" +
+    "%(?![0-9a-f]{2})", "ig")
 
   /** Quote any character not in unreserved, punct, escaped, other or equal
    *  to '/' or '@'
    */
   private def quotePath(str: String) = {
     import js.JSStringOps._
-    str.jsReplace(pathQuoteRe, quoteChar)
+    str.jsReplace(pathQuoteRe, quoteStr)
   }
 
   /** matches any character not in unreserved, punct, escaped, other or equal
@@ -643,25 +721,45 @@ object URI {
    *  in IPv6 addresses, but technically speaking they are in reserved
    *  due to RFC2732).
    */
-  private val authorityQuoteRe =
-    new RegExp("[^a-z0-9-_.!~*'(),;:$&+=%\\s@\\[\\]]|%(?![0-9a-f]{2})", "ig")
+  private val authorityQuoteRe = new RegExp(
+    // !other = [\u0000-\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\u2028\u2029]
+    // Char class is: [:!other:^a-z0-9-_.!~*'(),;:$&+=%@\[\]]
+    "[\u0000- \"#/<>?\\^`{-}" +
+    "\u007f-\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\u2028\u2029]|" +
+    "%(?![0-9a-f]{2})", "ig")
 
   /** Quote any character not in unreserved, punct, escaped, other or equal
    *  to '@'
    */
   private def quoteAuthority(str: String) = {
     import js.JSStringOps._
-    str.jsReplace(authorityQuoteRe, quoteChar)
+    str.jsReplace(authorityQuoteRe, quoteStr)
   }
 
   /** matches any character not in unreserved, reserved, escaped or other */
-  private val illegalQuoteRe =
-    new RegExp("[^a-z0-9-_.!~*'(),;:$&+=?/\\[\\]%\\s]|%(?![0-9a-f]{2})", "ig")
+  private val illegalQuoteRe = new RegExp(
+    // !other = [\u0000-\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\u2028\u2029]
+    // Char class is: [:!other:^a-z0-9-_.!~*'(),;:$&+=?/\\[\\]%]
+    "[\u0000- \"#<>@\\^`{-}" +
+    "\u007f-\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000\u2028\u2029]|" +
+    "%(?![0-9a-f]{2})", "ig")
 
   /** Quote any character not in unreserved, reserved, escaped or other */
   private def quoteIllegal(str: String) = {
     import js.JSStringOps._
-    str.jsReplace(illegalQuoteRe, quoteChar)
+    str.jsReplace(illegalQuoteRe, quoteStr)
+  }
+
+  /** matches characters not in ASCII
+   *
+   *  Note: It is important that the match is maximal, since we might encounter
+   *  surrogates that need to be encoded in one shot.
+   */
+  private val nonASCIIQuoteRe = new RegExp("[^\u0000-\u007F]+", "g")
+
+  private def quoteNonASCII(str: String) = {
+    import js.JSStringOps._
+    str.jsReplace(nonASCIIQuoteRe, quoteStr)
   }
 
   /** Case-sensitive comparison that is case-insensitive inside URI

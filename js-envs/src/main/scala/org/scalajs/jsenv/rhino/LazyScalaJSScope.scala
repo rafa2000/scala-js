@@ -25,11 +25,11 @@ import org.mozilla.javascript.{Scriptable, Context}
  *  It is immensely useful, because it allows to load lazily only the scripts
  *  that are actually needed.
  */
-class LazyScalaJSScope(
+private[rhino] class LazyScalaJSScope(
     coreLib: ScalaJSCoreLib,
     globalScope: Scriptable,
     base: Scriptable,
-    isStatics: Boolean = false) extends Scriptable {
+    isStatics: Boolean) extends Scriptable {
 
   private val fields = mutable.HashMap.empty[String, Any]
   private var prototype: Scriptable = _
@@ -53,49 +53,59 @@ class LazyScalaJSScope(
     else name
   }
 
-  override def getClassName() = "LazyScalaJSScope"
+  override def getClassName(): String = "LazyScalaJSScope"
 
-  override def get(name: String, start: Scriptable) = {
-    fields.getOrElse(name, {
-      try {
-        load(name)
-        fields.getOrElse(name, Scriptable.NOT_FOUND)
-      } catch {
-        // We need to re-throw the exception if `load` fails, otherwise the
-        // JavaScript runtime will not catch it.
-        case t: ScalaJSCoreLib.ClassNotFoundException =>
-          throw Context.throwAsScriptRuntimeEx(t)
-      }
-    }).asInstanceOf[AnyRef]
+  override def get(name: String, start: Scriptable): AnyRef = {
+    if (name == "__noSuchMethod__") {
+      /* Automatically called by Rhino when trying to call a method fails.
+       * We don't want to throw a ClassNotFoundException for this case, but
+       * rather return a proper NOT_FOUND sentinel. Otherwise, this exception
+       * would "shadow" the real one containing the class name that could not
+       * be found on the classpath.
+       */
+      Scriptable.NOT_FOUND
+    } else {
+      fields.getOrElse(name, {
+        try {
+          load(name)
+          fields.getOrElse(name, Scriptable.NOT_FOUND)
+        } catch {
+          // We need to re-throw the exception if `load` fails, otherwise the
+          // JavaScript runtime will not catch it.
+          case t: RhinoJSEnv.ClassNotFoundException =>
+            throw Context.throwAsScriptRuntimeEx(t)
+        }
+      }).asInstanceOf[AnyRef]
+    }
   }
-  override def get(index: Int, start: Scriptable) =
+
+  override def get(index: Int, start: Scriptable): AnyRef =
     get(index.toString, start)
 
-  override def has(name: String, start: Scriptable) =
+  override def has(name: String, start: Scriptable): Boolean =
     fields.contains(name)
-  override def has(index: Int, start: Scriptable) =
+  override def has(index: Int, start: Scriptable): Boolean =
     has(index.toString, start)
 
-  override def put(name: String, start: Scriptable, value: Any) = {
+  override def put(name: String, start: Scriptable, value: Any): Unit =
     fields(name) = value
-  }
-  override def put(index: Int, start: Scriptable, value: Any) =
+  override def put(index: Int, start: Scriptable, value: Any): Unit =
     put(index.toString, start, value)
 
-  override def delete(name: String) = ()
-  override def delete(index: Int) = ()
+  override def delete(name: String): Unit = ()
+  override def delete(index: Int): Unit = ()
 
-  override def getPrototype() = prototype
-  override def setPrototype(value: Scriptable) = prototype = value
+  override def getPrototype(): Scriptable = prototype
+  override def setPrototype(value: Scriptable): Unit = prototype = value
 
-  override def getParentScope() = parentScope
-  override def setParentScope(value: Scriptable) = parentScope = value
+  override def getParentScope(): Scriptable = parentScope
+  override def setParentScope(value: Scriptable): Unit = parentScope = value
 
-  override def getIds() = fields.keys.toArray
+  override def getIds(): Array[AnyRef] = fields.keys.toArray
 
-  override def getDefaultValue(hint: java.lang.Class[_]) = {
+  override def getDefaultValue(hint: java.lang.Class[_]): AnyRef = {
     base.getDefaultValue(hint)
   }
 
-  override def hasInstance(instance: Scriptable) = false
+  override def hasInstance(instance: Scriptable): Boolean = false
 }

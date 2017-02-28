@@ -15,15 +15,15 @@ import org.scalajs.core.tools.io._
 
 package object rhino {
 
-  implicit class ContextOps(val self: Context) extends AnyVal {
+  private[rhino] implicit class ContextOps(val self: Context) extends AnyVal {
     def evaluateFile(scope: Scriptable, file: VirtualJSFile,
         securityDomain: AnyRef = null): Any = {
       self.evaluateString(scope, file.content, file.path, 1, securityDomain)
     }
   }
 
-  implicit class ScriptableObjectOps(val self: Scriptable) {
-    def addFunction(name: String, function: Array[AnyRef] => Any) = {
+  private[rhino] implicit class ScriptableObjectOps(val self: Scriptable) {
+    def addFunction(name: String, function: Array[AnyRef] => Any): Unit = {
       val rhinoFunction =
         new BaseFunction {
           ScriptRuntime.setFunctionProtoAndParent(this, self)

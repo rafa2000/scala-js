@@ -14,12 +14,6 @@ import ir.ScalaJSVersions
 import ir.Trees.{Tree, ClassDef}
 import ir.Printers.{InfoPrinter, IRTreePrinter}
 
-import org.scalajs.core.tools.sem.Semantics
-import org.scalajs.core.tools.optimizer.LinkedClass
-import org.scalajs.core.tools.javascript
-import javascript.ScalaJSClassEmitter
-import javascript.Printers.JSTreePrinter
-
 import org.scalajs.core.tools.io._
 import scala.collection.immutable.Seq
 
@@ -28,10 +22,8 @@ import java.util.zip.{ZipFile, ZipEntry}
 
 object Scalajsp {
 
-  case class Options(
+  private case class Options(
     infos: Boolean = false,
-    desugar: Boolean = false,
-    showReflProxy: Boolean = false,
     jar: Option[File] = None,
     fileNames: Seq[String] = Seq.empty)
 
@@ -46,16 +38,9 @@ object Scalajsp {
         .valueName("<jar>")
         .action { (x, c) => c.copy(jar = Some(x)) }
         .text("Read *.sjsir file(s) from the given JAR.")
-      opt[Unit]('d', "desugar")
-        .action { (_, c) => c.copy(desugar = true) }
-        .text("Desugar JS trees. Generates ECMAScript5 code. However, " +
-            "the generated runtime type information will be wrong.")
       opt[Unit]('i', "infos")
         .action { (_, c) => c.copy(infos = true) }
         .text("Show DCE infos instead of trees")
-      opt[Unit]('p', "reflProxies")
-        .action { (_, c) => c.copy(showReflProxy = true) }
-        .text("Show reflective call proxies")
       opt[Unit]('s', "supported")
         .action { (_,_) => printSupported(); sys.exit() }
         .text("Show supported Scala.js IR versions")
@@ -83,31 +68,19 @@ object Scalajsp {
     }
   }
 
-  def printSupported(): Unit = {
+  private def printSupported(): Unit = {
     import ScalaJSVersions._
     println(s"Emitted Scala.js IR version is: $binaryEmitted")
     println("Supported Scala.js IR versions are")
     binarySupported.foreach(v => println(s"* $v"))
   }
 
-  def displayFileContent(vfile: VirtualScalaJSIRFile, opts: Options): Unit = {
+  private def displayFileContent(vfile: VirtualScalaJSIRFile,
+      opts: Options): Unit = {
     if (opts.infos)
-      new InfoPrinter(stdout).printClassInfo(vfile.info)
-    else {
-      val (info, tree) = vfile.infoAndTree
-      val outTree = {
-        if (opts.showReflProxy) tree
-        else filterOutReflProxies(tree)
-      }
-
-      if (opts.desugar) {
-        val pseudoLinked = LinkedClass(info, outTree, ancestors = Nil)
-        val printer = new JSTreePrinter(stdout)
-        val emitter = new ScalaJSClassEmitter(Semantics.Defaults)
-        printer.printTopLevelTree(emitter.genClassDef(pseudoLinked))
-      } else
-        new IRTreePrinter(stdout).printTopLevelTree(outTree)
-    }
+      new InfoPrinter(stdout).print(vfile.info)
+    else
+      new IRTreePrinter(stdout).printTopLevelTree(vfile.tree)
 
     stdout.flush()
   }
@@ -149,15 +122,5 @@ object Scalajsp {
 
   private val stdout =
     new BufferedWriter(new OutputStreamWriter(Console.out, "UTF-8"))
-
-  private def filterOutReflProxies(tree: ClassDef): ClassDef = {
-    import ir.Trees._
-    import ir.Definitions.isReflProxyName
-    val newDefs = tree.defs.filter {
-      case MethodDef(_, Ident(name, _), _, _, _) => !isReflProxyName(name)
-      case _ => true
-    }
-    tree.copy(defs = newDefs)(tree.optimizerHints)(tree.pos)
-  }
 
 }

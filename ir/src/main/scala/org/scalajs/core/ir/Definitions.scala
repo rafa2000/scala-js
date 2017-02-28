@@ -9,6 +9,8 @@
 
 package org.scalajs.core.ir
 
+import Types._
+
 object Definitions {
   val ObjectClass = "O"
   val ClassClass  = "jl_Class"
@@ -32,6 +34,7 @@ object Definitions {
 
   val CharSequenceClass = "jl_CharSequence"
   val SerializableClass = "Ljava_io_Serializable"
+  val CloneableClass    = "jl_Cloneable"
   val ComparableClass   = "jl_Comparable"
   val NumberClass       = "jl_Number"
 
@@ -47,10 +50,12 @@ object Definitions {
       NumberClass, ComparableClass, SerializableClass)
   val AncestorsOfBoxedBooleanClass = Set(
       ComparableClass, SerializableClass)
+  val AncestorsOfBoxedUnitClass = Set(
+      SerializableClass)
 
   val AncestorsOfHijackedClasses =
     AncestorsOfStringClass ++ AncestorsOfHijackedNumberClasses ++
-    AncestorsOfBoxedBooleanClass
+    AncestorsOfBoxedBooleanClass ++ AncestorsOfBoxedUnitClass
 
   val RuntimeNullClass = "sr_Null$"
   val RuntimeNothingClass = "sr_Nothing$"
@@ -58,8 +63,22 @@ object Definitions {
   val ThrowableClass = "jl_Throwable"
 
   val PseudoArrayClass = "s_Array"
+  val AncestorsOfPseudoArrayClass = Set(
+      ObjectClass, SerializableClass, CloneableClass)
 
-  val ExportedConstructorsName = "__exportedInits"
+  /** Name of the static initializer method. */
+  final val StaticInitializerName = "clinit___"
+
+  /** Name used for infos of class exports
+   *
+   *  These currently are exported constructors and top level exports)
+   *
+   *  TODO give this a better name once we can break backwards compat.
+   */
+  val ClassExportsName = "__exportedInits"
+
+  @deprecated("Use ClassExportsName instead", "0.6.14")
+  def ExportedConstructorsName: String = "__exportedInits"
 
   /** Encodes a class name. */
   def encodeClassName(fullName: String): String = {
@@ -137,12 +156,64 @@ object Definitions {
   private val decompressedPrefixes: Seq[(String, String)] =
     compressedPrefixes map { case (a, b) => (b, a) }
 
+  /** Decodes a method name into its full signature.
+   *
+   *  This discards the information whether the method is private or not, and
+   *  at which class level it is private. If necessary, you can recover that
+   *  information from `encodedName.indexOf("__p") >= 0`.
+   */
+  def decodeMethodName(
+      encodedName: String): (String, List[ReferenceType], Option[ReferenceType]) = {
+    val (simpleName, privateAndSigString) = if (isConstructorName(encodedName)) {
+      val privateAndSigString =
+        if (encodedName == "init___") ""
+        else encodedName.stripPrefix("init___") + "__"
+      ("<init>", privateAndSigString)
+    } else if (encodedName == StaticInitializerName) {
+      ("<clinit>", "")
+    } else {
+      val pos = encodedName.indexOf("__")
+      val pos2 =
+        if (!encodedName.substring(pos + 2).startsWith("p")) pos
+        else encodedName.indexOf("__", pos + 2)
+      (encodedName.substring(0, pos), encodedName.substring(pos2 + 2))
+    }
+
+    // -1 preserves trailing empty strings
+    val parts = privateAndSigString.split("__", -1).toSeq
+    val paramsAndResultStrings =
+      if (parts.headOption.exists(_.startsWith("p"))) parts.tail
+      else parts
+
+    val paramStrings :+ resultString = paramsAndResultStrings
+
+    val paramTypes = paramStrings.map(decodeReferenceType).toList
+    val resultType =
+      if (resultString == "") None // constructor or reflective proxy
+      else Some(decodeReferenceType(resultString))
+
+    (simpleName, paramTypes, resultType)
+  }
+
+  /** Decodes a [[Types.ReferenceType]], such as in an encoded method signature.
+   */
+  def decodeReferenceType(encodedName: String): ReferenceType = {
+    val arrayDepth = encodedName.indexWhere(_ != 'A')
+    if (arrayDepth == 0)
+      ClassType(encodedName)
+    else
+      ArrayType(encodedName.substring(arrayDepth), arrayDepth)
+  }
+
   /* Common predicates on encoded names */
 
   def isConstructorName(name: String): Boolean =
     name.startsWith("init___")
 
-  def isReflProxyName(name: String): Boolean =
-    name.endsWith("__") && !isConstructorName(name)
+  def isReflProxyName(name: String): Boolean = {
+    name.endsWith("__") &&
+    !isConstructorName(name) &&
+    name != StaticInitializerName
+  }
 
 }

@@ -4,33 +4,36 @@ import scala.annotation.switch
 
 import scala.scalajs.js
 
-final class Pattern private (pattern0: String, flags0: Int)
+final class Pattern private (jsRegExp: js.RegExp, _pattern: String, _flags: Int)
     extends Serializable {
 
   import Pattern._
 
-  def pattern(): String = pattern0
-  def flags(): Int = flags1
+  def pattern(): String = _pattern
+  def flags(): Int = _flags
 
-  private[regex] val (jspattern, flags1) = {
-    if ((flags0 & LITERAL) != 0) (quote(pattern0), flags0)
-    else {
-      trySplitHack(pattern0, flags0) orElse
-      tryFlagHack(pattern0, flags0) getOrElse
-      (pattern0, flags0)
+  override def toString(): String = pattern
+
+  private[regex] def newJSRegExp(): js.RegExp = {
+    val r = new js.RegExp(jsRegExp)
+    if (r ne jsRegExp) {
+      r
+    } else {
+      /* Workaround for the PhantomJS 1.x bug
+       * https://github.com/ariya/phantomjs/issues/11494
+       * which causes new js.RegExp(jsRegExp) to return the same object,
+       * rather than a new one.
+       * We therefore reconstruct the pattern and flags used to create
+       * jsRegExp and create a new one from there.
+       */
+      val jsFlags = {
+        (if (jsRegExp.global) "g" else "") +
+        (if (jsRegExp.ignoreCase) "i" else "") +
+        (if (jsRegExp.multiline) "m" else "")
+      }
+      new js.RegExp(jsRegExp.source, jsFlags)
     }
   }
-
-  private[regex] val jsflags = {
-    var f = "g"
-    if ((flags & CASE_INSENSITIVE) != 0)
-      f += "i"
-    if ((flags & MULTILINE) != 0)
-      f += "m"
-    f
-  }
-
-  override def toString(): String = pattern0
 
   def matcher(input: CharSequence): Matcher =
     new Matcher(this, input, 0, input.length)
@@ -39,34 +42,49 @@ final class Pattern private (pattern0: String, flags0: Int)
     split(input, 0)
 
   def split(input: CharSequence, limit: Int): Array[String] = {
-    val lim = if (limit > 0) limit else Int.MaxValue
-
-    val result = js.Array[String]()
     val inputStr = input.toString
-    val matcher = this.matcher(inputStr)
-    var prevEnd = 0
 
-    // Actually split original string
-    while ((result.length < lim-1) && matcher.find()) {
-      result.push(inputStr.substring(prevEnd, matcher.start))
-      prevEnd = matcher.end
-    }
-    result.push(inputStr.substring(prevEnd))
-
-    // Remove a leading empty element iff the first match was zero-length
-    // and there is no other place the regex matches
-    if (prevEnd == 0 && result.length == 2 && (lim > 2 || !matcher.find())) {
-      Array(inputStr)
+    // If the input string is empty, always return Array("") - #987, #2592
+    if (inputStr == "") {
+      Array("")
     } else {
-      var len = result.length
-      if (limit == 0) {
-        while (len > 1 && result(len-1).isEmpty)
-          len -= 1
+      // Actually split original string
+      val lim = if (limit > 0) limit else Int.MaxValue
+      val matcher = this.matcher(inputStr)
+      val builder = Array.newBuilder[String]
+      var prevEnd = 0
+      var size = 0
+      while ((size < lim-1) && matcher.find()) {
+        if (matcher.end == 0) {
+          /* If there is a zero-width match at the beginning of the string,
+           * ignore it, i.e., omit the resulting empty string at the beginning
+           * of the array.
+           */
+        } else {
+          builder += inputStr.substring(prevEnd, matcher.start)
+          size += 1
+        }
+        prevEnd = matcher.end
       }
+      builder += inputStr.substring(prevEnd)
+      val result = builder.result()
 
-      val actualResult = new Array[String](len)
-      result.copyToArray(actualResult)
-      actualResult
+      // With `limit == 0`, remove trailing empty strings.
+      if (limit != 0) {
+        result
+      } else {
+        var actualLength = result.length
+        while (actualLength != 0 && result(actualLength - 1) == "")
+          actualLength -= 1
+
+        if (actualLength == result.length) {
+          result
+        } else {
+          val actualResult = new Array[String](actualLength)
+          System.arraycopy(result, 0, actualResult, 0, actualLength)
+          actualResult
+        }
+      }
     }
   }
 }
@@ -82,11 +100,30 @@ object Pattern {
   final val CANON_EQ = 0x80
   final val UNICODE_CHARACTER_CLASS = 0x100
 
-  def compile(regex: String, flags: Int): Pattern =
-    new Pattern(regex, flags)
+  def compile(regex: String, flags: Int): Pattern = {
+    val (jsPattern, flags1) = {
+      if ((flags & LITERAL) != 0) {
+        (quote(regex), flags)
+      } else {
+        trySplitHack(regex, flags) orElse
+        tryFlagHack(regex, flags) getOrElse
+        (regex, flags)
+      }
+    }
+
+    val jsFlags = {
+      "g" +
+      (if ((flags1 & CASE_INSENSITIVE) != 0) "i" else "") +
+      (if ((flags1 & MULTILINE) != 0) "m" else "")
+    }
+
+    val jsRegExp = new js.RegExp(jsPattern, jsFlags)
+
+    new Pattern(jsRegExp, regex, flags1)
+  }
 
   def compile(regex: String): Pattern =
-    new Pattern(regex, 0)
+    compile(regex, 0)
 
   def matches(regex: String, input: CharSequence): Boolean =
     compile(regex).matcher(input).matches()
